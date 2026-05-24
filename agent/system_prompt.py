@@ -39,6 +39,7 @@ from agent.prompt_builder import (
     TASK_COMPLETION_GUIDANCE,
     TOOL_USE_ENFORCEMENT_GUIDANCE,
     TOOL_USE_ENFORCEMENT_MODELS,
+    COST_AWARENESS_GUIDANCE,
     parse_project_skill_config,
 )
 from agent.runtime_cwd import resolve_context_cwd
@@ -131,6 +132,8 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         tool_guidance.append(KANBAN_GUIDANCE)
     if tool_guidance:
         stable_parts.append(" ".join(tool_guidance))
+    # Cost awareness — injected for all sessions since output tokens dominate cost
+    stable_parts.append(COST_AWARENESS_GUIDANCE)
 
     # Computer-use (macOS) — goes in as its own block rather than being
     # merged into tool_guidance because the content is multi-paragraph.
