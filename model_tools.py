@@ -34,6 +34,8 @@ from toolsets import resolve_toolset, validate_toolset
 
 logger = logging.getLogger(__name__)
 
+TOOL_RESULT_MAX_CHARS = 8000  # truncate verbose tool results to save output tokens
+
 
 # =============================================================================
 # Async Bridging  (single source of truth -- used by registry.dispatch too)
@@ -1137,6 +1139,14 @@ def handle_function_call(
         except Exception as _hook_err:
             logger.debug("transform_tool_result hook error: %s", _hook_err)
 
+        # Truncate verbose tool results to save output tokens.
+        # The agent can re-run the tool or use read_file for full output.
+        if isinstance(result, str) and len(result) > TOOL_RESULT_MAX_CHARS:
+            result = (
+                result[:TOOL_RESULT_MAX_CHARS]
+                + f"\n\n[OUTPUT TRUNCATED: {len(result) - TOOL_RESULT_MAX_CHARS:,} chars omitted. "
+                + "Re-run with more specific parameters for full output.]"
+            )
         return result
 
     except Exception as e:
