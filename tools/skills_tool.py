@@ -93,6 +93,7 @@ SKILLS_DIR = HERMES_HOME / "skills"
 # Anthropic-recommended limits for progressive disclosure efficiency
 MAX_NAME_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 1024
+SKILL_CONTENT_MAX_CHARS = 12000  # truncate verbose skills to save output tokens
 
 # Platform identifiers for the 'platforms' frontmatter field.
 # Maps user-friendly names to sys.platform prefixes.
@@ -812,11 +813,19 @@ def _serve_plugin_skill(
                 "Could not preprocess plugin skill %s:%s", namespace, bare, exc_info=True
             )
 
+    # Truncate verbose skill content to save output tokens
+    full_content = f"{banner}{rendered_content}" if banner else rendered_content
+    if len(full_content) > SKILL_CONTENT_MAX_CHARS:
+        full_content = (
+            full_content[:SKILL_CONTENT_MAX_CHARS]
+            + f"\n\n[...truncated {len(full_content) - SKILL_CONTENT_MAX_CHARS:,} chars. "
+            + "Load linked files with skill_view(name, file_path='references/...') for full content.]"
+        )
     return json.dumps(
         {
             "success": True,
             "name": f"{namespace}:{bare}",
-            "content": f"{banner}{rendered_content}" if banner else rendered_content,
+            "content": full_content,
             "description": description,
             "linked_files": None,
             "readiness_status": SkillReadinessStatus.AVAILABLE.value,
@@ -1356,6 +1365,14 @@ def skill_view(
                 logger.debug(
                     "Could not preprocess skill content for %s", skill_name, exc_info=True
                 )
+
+        # Truncate verbose skill content to save output tokens
+        if len(rendered_content) > SKILL_CONTENT_MAX_CHARS:
+            rendered_content = (
+                rendered_content[:SKILL_CONTENT_MAX_CHARS]
+                + f"\n\n[...truncated {len(rendered_content) - SKILL_CONTENT_MAX_CHARS:,} chars. "
+                + "Load linked files with skill_view(name, file_path='references/...') for full content.]"
+            )
 
         result = {
             "success": True,
