@@ -249,15 +249,12 @@ TOOL_USE_ENFORCEMENT_GUIDANCE = (
     "# Tool-use enforcement\n"
     "You MUST use your tools to take action — do not describe what you would do "
     "or plan to do without actually doing it. When you say you will perform an "
-    "action (e.g. 'I will run the tests', 'Let me check the file', 'I will create "
-    "the project'), you MUST immediately make the corresponding tool call in the same "
+    "action, you MUST immediately make the corresponding tool call in the same "
     "response. Never end your turn with a promise of future action — execute it now.\n"
-    "Keep working until the task is actually complete. Do not stop with a summary of "
-    "what you plan to do next time. If you have tools available that can accomplish "
-    "the task, use them instead of telling the user what you would do.\n"
+    "Keep working until the task is actually complete. If you have tools available that "
+    "can accomplish the task, use them instead of telling the user what you would do.\n"
     "Every response should either (a) contain tool calls that make progress, or "
-    "(b) deliver a final result to the user. Responses that only describe intentions "
-    "without acting are not acceptable."
+    "(b) deliver a final result to the user."
 )
 
 # Model name substrings that trigger tool-use enforcement guidance.
@@ -882,11 +879,43 @@ CONTEXT_TRUNCATE_TAIL_RATIO = 0.2
 _SKILLS_PROMPT_CACHE_MAX = 8
 _SKILLS_PROMPT_CACHE: OrderedDict[tuple, str] = OrderedDict()
 _SKILLS_PROMPT_CACHE_LOCK = threading.Lock()
-_SKILLS_SNAPSHOT_VERSION = 1
+_SKILLS_SNAPSHOT_VERSION = 2  # 2 = msgpack primary, JSON fallback
 
 
 def _skills_prompt_snapshot_path() -> Path:
+    return get_hermes_home() / ".skills_prompt_snapshot.msgpack"
+
+
+def _skills_prompt_snapshot_path_json() -> Path:
+    """Legacy JSON fallback path (version 1)."""
     return get_hermes_home() / ".skills_prompt_snapshot.json"
+
+
+def _read_snapshot(path: Path) -> Optional[dict]:
+    """Read snapshot, trying msgpack first then JSON fallback."""
+    try:
+        import msgpack
+        with open(path, "rb") as f:
+            return msgpack.unpackb(f.read(), raw=False)
+    except Exception:
+        pass
+    # JSON fallback for legacy snapshots
+    json_path = _skills_prompt_snapshot_path_json()
+    if json_path.exists():
+        try:
+            return json.loads(json_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return None
+
+
+def _write_snapshot(path: Path, payload: dict) -> None:
+    """Write snapshot as msgpack binary."""
+    import msgpack
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "wb") as f:
+        f.write(msgpack.packb(payload))
+    tmp.rename(path)
 
 
 def clear_skills_system_prompt_cache(*, clear_snapshot: bool = False) -> None:
@@ -896,6 +925,7 @@ def clear_skills_system_prompt_cache(*, clear_snapshot: bool = False) -> None:
     if clear_snapshot:
         try:
             _skills_prompt_snapshot_path().unlink(missing_ok=True)
+            _skills_prompt_snapshot_path_json().unlink(missing_ok=True)
         except OSError as e:
             logger.debug("Could not remove skills prompt snapshot: %s", e)
 
@@ -917,14 +947,20 @@ def _load_skills_snapshot(skills_dir: Path) -> Optional[dict]:
     """Load the disk snapshot if it exists and its manifest still matches."""
     snapshot_path = _skills_prompt_snapshot_path()
     if not snapshot_path.exists():
-        return None
-    try:
-        snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
+        # Try legacy JSON path
+        json_path = _skills_prompt_snapshot_path_json()
+        if not json_path.exists():
+            return None
+        snapshot = _read_snapshot(snapshot_path)
+        if snapshot is None:
+            return None
+    else:
+        snapshot = _read_snapshot(snapshot_path)
+        if snapshot is None:
+            return None
     if not isinstance(snapshot, dict):
         return None
-    if snapshot.get("version") != _SKILLS_SNAPSHOT_VERSION:
+    if snapshot.get("version") not in (1, 2, _SKILLS_SNAPSHOT_VERSION):
         return None
     if snapshot.get("manifest") != _build_skills_manifest(skills_dir):
         return None
@@ -945,7 +981,7 @@ def _write_skills_snapshot(
         "category_descriptions": category_descriptions,
     }
     try:
-        atomic_json_write(_skills_prompt_snapshot_path(), payload)
+        _write_snapshot(_skills_prompt_snapshot_path(), payload)
     except Exception as e:
         logger.debug("Could not write skills prompt snapshot: %s", e)
 
