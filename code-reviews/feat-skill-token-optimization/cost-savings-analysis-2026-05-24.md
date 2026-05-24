@@ -30,23 +30,24 @@
 | Memory compact mode | 371 |
 | **Total per session** | **~3,536** |
 
-### Per-session dollar costs (DeepSeek V4 Pro @ $0.027/1M input)
+### Per-session dollar costs (opencode DeepSeek V4 Pro @ $0.0168/1M input, derived from actual billing data)
 
 | Scenario | Savings/session |
 |---|---|
-| First API call (cache miss) | $0.000087 |
-| 8-turn session, with caching | $0.000147 |
-| 8-turn session, no caching | $0.000693 |
-| 2-turn gateway session, cached | $0.000095 |
+| First API call (cache miss) | $0.000058 |
+| 8-turn session, with caching | $0.000098 |
+| 8-turn session, no caching | $0.000462 |
+| 2-turn gateway session, cached | $0.000063 |
 
 ### Annualized (43 sessions/day, 8-turn avg, cached)
 
-| Model | Annual savings |
-|---|---|
-| DeepSeek V4 Pro ($0.027/M) | **$2.31** |
-| GPT-4o-mini ($0.15/M) | $12.83 |
-| Claude 3.5 Haiku ($0.80/M) | $68.45 |
-| GPT-4o ($2.50/M) | $213.91 |
+| Model | Effective input price | Annual savings |
+|---|---|---|
+| DeepSeek V4 Pro (opencode) | $0.0168/M | **$1.54** |
+| DeepSeek V4 Pro (direct) | $0.27/M | $24.62 |
+| GPT-4o-mini | $0.15/M | $13.72 |
+| Claude 3.5 Haiku | $0.80/M | $73.21 |
+| GPT-4o | $2.50/M | $228.80 |
 
 ---
 
@@ -94,7 +95,7 @@ The system prompt occupies fixed space in every API call's context window. Shrin
 - Faster prefill (fewer tokens for the model to ingest before generating)
 - Less noise — fewer irrelevant skills means the agent is less likely to load the wrong ones
 
-This is the **primary value proposition**, not dollar savings. At DeepSeek pricing, the dollar savings are noise-level ($2.31/year). But the quality improvement — cleaner agent behavior, faster response, larger effective context — is real and measurable.
+This is the **primary value proposition**, not dollar savings. At opencode's DeepSeek V4 Pro pricing ($0.0168/1M input), the dollar savings are noise-level ($1.54/year). But the quality improvement — cleaner agent behavior, faster response, larger effective context — is real and measurable.
 
 ### Caching effect
 
@@ -107,7 +108,7 @@ The optimization is **most impactful for gateway/multi-project use cases** where
 
 ### Model pricing matters
 
-At DeepSeek V4 Pro's $0.027/1M input tokens, the branch saves $2.31/year. At GPT-4o's $2.50/1M, it saves $213.91/year. The *relative* token savings (51.5%) are model-agnostic; the *absolute* dollar savings scale linearly with model price.
+At DeepSeek V4 Pro's opencode rate ($0.0168/1M), the branch saves $1.54/year. At GPT-4o's $2.50/1M, it saves $228.80/year. The *relative* token savings (51.5%) are model-agnostic; the *absolute* dollar savings scale linearly with model price.
 
 ---
 
@@ -157,10 +158,10 @@ Changing top-level skills from `category=parts[0]` to `category="general"` chang
 |---|---|
 | Token savings per session | ~3,536 tokens |
 | Dominant mechanism | Skill filtering (90%) |
-| Annual savings (DeepSeek V4 Pro) | $2.31 (cached) / $10.87 (uncached) |
-| Annual savings (GPT-4o) | $213.91 (cached) / $1,007 (uncached) |
+| Annual savings (opencode DeepSeek V4 Pro) | $1.54 (cached) / $7.25 (uncached) |
+| Annual savings (GPT-4o) | $228.80 (cached) / $1,072 (uncached) |
 | Primary value | Context headroom, latency, agent focus |
 | Biggest risk | Lazy format → excess skill_view calls |
 | Best use case | Gateway mode, multi-project setups |
 
-**Bottom line:** The optimization is worthwhile for quality and latency, not raw cost at current DeepSeek pricing. The dominant mechanism is project-level skill filtering — without it, the savings are ~15% at best. The compact/lazy formats, guidance trims, and memory compact mode are incremental wins that compound with filtering but don't stand alone. For users on premium models (GPT-4o, Claude), the dollar savings become meaningful.
+**Bottom line:** The optimization is worthwhile for quality and latency, not raw cost at opencode's DeepSeek V4 Pro pricing ($0.0168/1M input — $1.54/year). The dominant mechanism is project-level skill filtering — without it, the savings are ~15% at best. The compact/lazy formats, guidance trims, and memory compact mode are incremental wins that compound with filtering but don't stand alone. For users on premium models (GPT-4o, Claude), the dollar savings become meaningful ($73-229/year).

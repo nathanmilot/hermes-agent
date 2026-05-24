@@ -257,6 +257,15 @@ TOOL_USE_ENFORCEMENT_GUIDANCE = (
     "(b) deliver a final result to the user."
 )
 
+COST_AWARENESS_GUIDANCE = (
+    "# Cost awareness\n"
+    "Output tokens are expensive. Be as concise as possible in every response.\n"
+    "Prefer short answers over long ones. One sentence is better than three.\n"
+    "When delivering results, state the outcome — not the journey. Skip narration.\n"
+    "Use tools for detail (read_file, terminal) rather than describing output inline.\n"
+    "If a response can be under 100 words, keep it under 100 words."
+)
+
 # Model name substrings that trigger tool-use enforcement guidance.
 # Add new patterns here when a model family needs explicit steering.
 TOOL_USE_ENFORCEMENT_MODELS = ("gpt", "codex", "gemini", "gemma", "grok", "glm", "qwen", "deepseek")
