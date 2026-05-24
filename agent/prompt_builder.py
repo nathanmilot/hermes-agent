@@ -74,7 +74,7 @@ def _find_git_root(start: Path) -> Optional[Path]:
     return None
 
 
-_HERMES_MD_NAMES = (".hermes.md", "HERMES.md")
+_HERMES_MD_NAMES = (".hermes.md", "HERMES.md", "hermes.md")
 
 
 def _find_hermes_md(cwd: Path) -> Optional[Path]:
@@ -145,22 +145,13 @@ MEMORY_GUIDANCE = (
     "tool: user preferences, environment details, tool quirks, and stable conventions. "
     "Memory is injected into every turn, so keep it compact and focused on facts that "
     "will still matter later.\n"
-    "Prioritize what reduces future user steering — the most valuable memory is one "
-    "that prevents the user from having to correct or remind you again. "
-    "User preferences and recurring corrections matter more than procedural task details.\n"
+    "Prioritize what reduces future user steering — user preferences and recurring "
+    "corrections matter more than procedural task details.\n"
     "Do NOT save task progress, session outcomes, completed-work logs, or temporary TODO "
     "state to memory; use session_search to recall those from past transcripts. "
-    "Specifically: do not record PR numbers, issue numbers, commit SHAs, 'fixed bug X', "
-    "'submitted PR Y', 'Phase N done', file counts, or any artifact that will be stale "
-    "in 7 days. If a fact will be stale in a week, it does not belong in memory. "
-    "If you've discovered a new way to do something, solved a problem that could be "
-    "necessary later, save it as a skill with the skill tool.\n"
     "Write memories as declarative facts, not instructions to yourself. "
     "'User prefers concise responses' ✓ — 'Always respond concisely' ✗. "
-    "'Project uses pytest with xdist' ✓ — 'Run tests with pytest -n 4' ✗. "
-    "Imperative phrasing gets re-read as a directive in later sessions and can "
-    "cause repeated work or override the user's current request. Procedures and "
-    "workflows belong in skills, not memory."
+    "Procedures and workflows belong in skills, not memory."
 )
 
 SESSION_SEARCH_GUIDANCE = (
@@ -1050,6 +1041,64 @@ def _skill_should_show(
     return True
 
 
+def _skill_passes_project_filters(
+    name: str,
+    category: str,
+    include_set: "set[str] | None" = None,
+    exclude_set: "set[str] | None" = None,
+    cats_include_set: "set[str] | None" = None,
+    cats_exclude_set: "set[str] | None" = None,
+    alt_name: "str | None" = None,
+) -> bool:
+    """Check whether a skill should appear given project-scoped filter sets.
+
+    Positive filters (include_set / cats_include_set) use OR semantics:
+    a skill passes if its name, alt_name, or category (including prefix
+    matches) appears in include_set, OR its category matches
+    cats_include_set.  If neither positive set is provided, everything
+    passes by default.
+
+    Negative filters (exclude_set / cats_exclude_set) use OR semantics:
+    a skill is removed if its name, alt_name, or category (including
+    prefix matches) appears in exclude_set, OR its category matches
+    cats_exclude_set.
+    """
+    name_lower = name.lower()
+    alt_lower = alt_name.lower() if alt_name else None
+    cat_lower = category.lower()
+    has_positive = bool(include_set or cats_include_set)
+    if has_positive:
+        matched = False
+        if include_set:
+            if name_lower in include_set or cat_lower in include_set:
+                matched = True
+            elif alt_lower and alt_lower in include_set:
+                matched = True
+            else:
+                cat_parts = cat_lower.split("/")
+                if any("/".join(cat_parts[:i]) in include_set for i in range(1, len(cat_parts) + 1)):
+                    matched = True
+        if cats_include_set and not matched:
+            cat_parts = cat_lower.split("/")
+            if any("/".join(cat_parts[:i]) in cats_include_set for i in range(1, len(cat_parts) + 1)):
+                matched = True
+        if not matched:
+            return False
+    if exclude_set:
+        if name_lower in exclude_set or cat_lower in exclude_set:
+            return False
+        if alt_lower and alt_lower in exclude_set:
+            return False
+        cat_parts = cat_lower.split("/")
+        if any("/".join(cat_parts[:i]) in exclude_set for i in range(1, len(cat_parts) + 1)):
+            return False
+    if cats_exclude_set:
+        cat_parts = cat_lower.split("/")
+        if any("/".join(cat_parts[:i]) in cats_exclude_set for i in range(1, len(cat_parts) + 1)):
+            return False
+    return True
+
+
 def build_skills_system_prompt(
     available_tools: "set[str] | None" = None,
     available_toolsets: "set[str] | None" = None,
@@ -1130,46 +1179,13 @@ def build_skills_system_prompt(
     skills_by_category: dict[str, list[tuple[str, str]]] = {}
     category_descriptions: dict[str, str] = {}
 
-    def _skill_passes_project_filters(name: str, category: str, alt_name: str | None = None) -> bool:
-        name_lower = name.lower()
-        alt_lower = alt_name.lower() if alt_name else None
-        cat_lower = category.lower()
-        # Positive filters (OR): skill passes if name/alt_name/category matches
-        # include_set OR category matches cats_include_set. If neither is set,
-        # pass by default.
-        has_positive = bool(include_set or cats_include_set)
-        if has_positive:
-            matched = False
-            if include_set:
-                if name_lower in include_set or cat_lower in include_set:
-                    matched = True
-                elif alt_lower and alt_lower in include_set:
-                    matched = True
-                else:
-                    cat_parts = cat_lower.split("/")
-                    if any("/".join(cat_parts[:i]) in include_set for i in range(1, len(cat_parts)+1)):
-                        matched = True
-            if cats_include_set and not matched:
-                cat_parts = cat_lower.split("/")
-                if any("/".join(cat_parts[:i]) in cats_include_set for i in range(1, len(cat_parts)+1)):
-                    matched = True
-            if not matched:
-                return False
-        # Negative filters (OR): skill removed if name/alt_name/category matches
-        # exclude_set OR category matches cats_exclude_set.
-        if exclude_set:
-            if name_lower in exclude_set or cat_lower in exclude_set:
-                return False
-            if alt_lower and alt_lower in exclude_set:
-                return False
-            cat_parts = cat_lower.split("/")
-            if any("/".join(cat_parts[:i]) in exclude_set for i in range(1, len(cat_parts)+1)):
-                return False
-        if cats_exclude_set:
-            cat_parts = cat_lower.split("/")
-            if any("/".join(cat_parts[:i]) in cats_exclude_set for i in range(1, len(cat_parts)+1)):
-                return False
-        return True
+    # Pre-build the filter-kwargs dict so call sites don't repeat themselves.
+    _filter_kwargs = {
+        "include_set": include_set,
+        "exclude_set": exclude_set,
+        "cats_include_set": cats_include_set,
+        "cats_exclude_set": cats_exclude_set,
+    }
 
     if snapshot is not None:
         # Fast path: use pre-parsed metadata from disk
@@ -1190,7 +1206,7 @@ def build_skills_system_prompt(
                 available_toolsets,
             ):
                 continue
-            if not _skill_passes_project_filters(frontmatter_name, category, skill_name):
+            if not _skill_passes_project_filters(frontmatter_name, category, alt_name=skill_name, **_filter_kwargs):
                 continue
             skills_by_category.setdefault(category, []).append(
                 (frontmatter_name, entry.get("description", ""))
@@ -1217,7 +1233,7 @@ def build_skills_system_prompt(
                 available_toolsets,
             ):
                 continue
-            if not _skill_passes_project_filters(entry["frontmatter_name"], entry["category"], entry["skill_name"]):
+            if not _skill_passes_project_filters(entry["frontmatter_name"], entry["category"], alt_name=entry["skill_name"], **_filter_kwargs):
                 continue
             skills_by_category.setdefault(entry["category"], []).append(
                 (entry["frontmatter_name"], entry["description"])
@@ -1274,7 +1290,7 @@ def build_skills_system_prompt(
                     available_toolsets,
                 ):
                     continue
-                if not _skill_passes_project_filters(frontmatter_name, entry["category"], skill_name):
+                if not _skill_passes_project_filters(frontmatter_name, entry["category"], alt_name=skill_name, **_filter_kwargs):
                     continue
                 seen_skill_names.add(frontmatter_name)
                 skills_by_category.setdefault(entry["category"], []).append(
