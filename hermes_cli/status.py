@@ -544,6 +544,45 @@ def show_status(args):
         print("  Active:       0")
 
     # =========================================================================
+    # Token optimization
+    # =========================================================================
+    print()
+    print(color("◆ Token Optimization", Colors.CYAN, Colors.BOLD))
+    try:
+        from agent.prompt_builder import parse_project_skill_config
+        cfg = parse_project_skill_config()
+        fmt = cfg.get("index_format", "full")
+        filter_active = bool(
+            cfg.get("include") or cfg.get("exclude")
+            or cfg.get("categories_include") or cfg.get("categories_exclude")
+        )
+        print(f"  Index format: {fmt}")
+        print(f"  Skill filter: {check_mark(filter_active)} {'active' if filter_active else 'inactive'} (set in AGENTS.md)")
+    except Exception:
+        print(f"  Index format: {color('unavailable', Colors.DIM)}")
+    try:
+        max_tok = config.get("model", {}).get("max_tokens")
+        comp_thresh = config.get("compression", {}).get("threshold")
+        reasoning = config.get("agent", {}).get("reasoning_effort", "")
+        if max_tok:
+            print(f"  Output cap:   {max_tok:,} tokens/response")
+        if comp_thresh:
+            print(f"  Compression:  {float(comp_thresh)*100:.0f}% threshold")
+        if reasoning:
+            print(f"  Reasoning:    {reasoning}")
+        # Check memory compact
+        try:
+            from tools.memory_tool import MemoryStore
+            ms = MemoryStore()
+            print(f"  Memory:       {'compact summaries' if ms._compact else 'full entries'}")
+        except Exception:
+            pass
+    except Exception:
+        pass
+    print(f"  Cost aware:   {check_mark(True)} active (concise-response directive)")
+    print(f"  Skills:       dynamically loaded & stowed (skill_view → skill_manage stow)")
+
+    # =========================================================================
     # Deep checks
     # =========================================================================
     if deep:
