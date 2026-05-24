@@ -10977,12 +10977,8 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 _is_root = os.geteuid() == 0 if hasattr(os, "geteuid") else False
                 for scope, scope_cmd in [
                     ("user", ["systemctl", "--user"]),
-                    ("system", ["systemctl"]),
+                    ("system", ["sudo", "systemctl"] if not _is_root else ["systemctl"]),
                 ]:
-                    # Skip system-scope commands when not root — they'll
-                    # trigger a polkit auth prompt and hang the update.
-                    if scope == "system" and not _is_root:
-                        continue
                     try:
                         result = subprocess.run(
                             scope_cmd
