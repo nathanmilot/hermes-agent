@@ -426,6 +426,19 @@ export function SessionPanel({ info, maxWidth, sid, t }: SessionPanelProps) {
           <Text color={t.color.muted}>/help for commands</Text>
         </Text>
 
+        {/* ── Optimization indicators ── */}
+        {(info.skill_filter_active || info.index_format !== 'full' || info.max_tokens || info.cost_awareness) && (
+          <Text color={t.color.muted}>
+            <Text color={t.color.accent}>⚡ opt: </Text>
+            {info.skill_filter_active && <Text color={t.color.text}>filtered </Text>}
+            {info.index_format && info.index_format !== 'full' && (
+              <Text color={t.color.text}>{info.index_format} </Text>
+            )}
+            {info.max_tokens && <Text color={t.color.text}>cap={info.max_tokens} </Text>}
+            {info.cost_awareness && <Text color={t.color.text}>lean</Text>}
+          </Text>
+        )}
+
         {typeof info.update_behind === 'number' && info.update_behind > 0 && (
           <Text bold color={t.color.warn}>
             ! {info.update_behind} {info.update_behind === 1 ? 'commit' : 'commits'} behind
