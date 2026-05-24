@@ -1300,6 +1300,13 @@ def build_skills_system_prompt(
     if not skills_by_category:
         result = ""
     else:
+        # Log filter effectiveness for debugging
+        total_skills = sum(len(v) for v in skills_by_category.values())
+        logger.debug(
+            "Skills index: %d skills in %d categories (format=%s, include=%s, exclude=%s)",
+            total_skills, len(skills_by_category), index_format,
+            bool(include_set), bool(exclude_set),
+        )
         if index_format == "compact":
             index_lines = []
             for category in sorted(skills_by_category.keys()):
@@ -1316,7 +1323,9 @@ def build_skills_system_prompt(
                 else:
                     index_lines.append(f"  {category}:")
                 for name, desc in unique_skills:
-                    index_lines.append(f"    {name}:{desc}")
+                    # Trim descriptions in compact mode (~20% additional savings)
+                    trimmed = desc[:120] + "..." if len(desc) > 120 else desc
+                    index_lines.append(f"    {name}:{trimmed}")
             joined = "\n".join(index_lines)
             result = (
                 "## Skills (mandatory)\n"
@@ -1539,7 +1548,11 @@ def parse_project_skill_config(cwd: "str | None" = None) -> dict:
                         # Check for index_format
                         m = re.match(r'skills?\.index_format:\s*(\S+)', line, re.IGNORECASE)
                         if m:
-                            result["index_format"] = m.group(1).strip().strip("'\"")
+                            fmt_val = m.group(1).strip().strip("'\"")
+                            if fmt_val in ("compact", "full"):
+                                result["index_format"] = fmt_val
+                            else:
+                                logger.warning("Unknown skills.index_format '%s' — using 'full'", fmt_val)
 
                         # Check for YAML list start: "skills.include:" followed by "- item" lines
                         for key, result_key in [
@@ -1587,7 +1600,10 @@ def parse_project_skill_config(cwd: "str | None" = None) -> dict:
                     result.setdefault(key, []).extend([str(v) for v in val])
             fmt = project_cfg.get("index_format")
             if fmt and isinstance(fmt, str):
-                result.setdefault("index_format", fmt)
+                if fmt in ("compact", "full"):
+                    result.setdefault("index_format", fmt)
+                else:
+                    logger.warning("Unknown skills.project.index_format '%s' in config.yaml — using 'full'", fmt)
     except Exception:
         pass
 
