@@ -1016,6 +1016,10 @@ def _build_snapshot_entry(
     if isinstance(platforms, str):
         platforms = [platforms]
 
+    tags = frontmatter.get("tags") or []
+    if isinstance(tags, str):
+        tags = [t.strip() for t in tags.split(",") if t.strip()]
+
     return {
         "skill_name": skill_name,
         "category": category,
@@ -1023,6 +1027,7 @@ def _build_snapshot_entry(
         "description": description,
         "platforms": [str(p).strip() for p in platforms if str(p).strip()],
         "conditions": extract_skill_conditions(frontmatter),
+        "tags": tags[:8],  # cap at 8 keywords
     }
 
 
@@ -1225,6 +1230,7 @@ def build_skills_system_prompt(
     snapshot = _load_skills_snapshot(skills_dir)
 
     skills_by_category: dict[str, list[tuple[str, str]]] = {}
+    skill_tags: dict[str, list[str]] = {}  # frontmatter tags per skill name
     category_descriptions: dict[str, str] = {}
 
     # Pre-build the filter-kwargs dict so call sites don't repeat themselves.
@@ -1259,6 +1265,9 @@ def build_skills_system_prompt(
             skills_by_category.setdefault(category, []).append(
                 (frontmatter_name, entry.get("description", ""))
             )
+            tags = entry.get("tags")
+            if tags:
+                skill_tags[frontmatter_name] = [str(t) for t in tags]
         category_descriptions = {
             str(k): str(v)
             for k, v in (snapshot.get("category_descriptions") or {}).items()
@@ -1344,6 +1353,9 @@ def build_skills_system_prompt(
                 skills_by_category.setdefault(entry["category"], []).append(
                     (frontmatter_name, entry["description"])
                 )
+                tags = entry.get("tags")
+                if tags:
+                    skill_tags[frontmatter_name] = [str(t) for t in tags]
             except Exception as e:
                 logger.debug("Error reading external skill %s: %s", skill_file, e)
 
