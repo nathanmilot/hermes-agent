@@ -202,7 +202,7 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
             skill_exclude=project_cfg.get("exclude"),
             categories_include=project_cfg.get("categories_include"),
             categories_exclude=project_cfg.get("categories_exclude"),
-            index_format=project_cfg.get("index_format", "full"),
+            index_format=project_cfg.get("index_format", "keywords"),
         )
     else:
         skills_prompt = ""
