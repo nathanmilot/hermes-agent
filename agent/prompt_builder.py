@@ -1016,7 +1016,13 @@ def _build_snapshot_entry(
     if isinstance(platforms, str):
         platforms = [platforms]
 
-    tags = frontmatter.get("tags") or frontmatter.get("metadata", {}).get("hermes", {}).get("tags") or []
+    tags = frontmatter.get("tags") or []
+    if not tags:
+        meta = frontmatter.get("metadata")
+        if isinstance(meta, dict):
+            hermes_meta = meta.get("hermes")
+            if isinstance(hermes_meta, dict):
+                tags = hermes_meta.get("tags") or []
     if isinstance(tags, str):
         tags = [t.strip() for t in tags.split(",") if t.strip()]
 
@@ -1157,7 +1163,7 @@ def build_skills_system_prompt(
     skill_exclude: "list[str] | None" = None,
     categories_include: "list[str] | None" = None,
     categories_exclude: "list[str] | None" = None,
-    index_format: str = "full",
+    index_format: str = "keywords",
 ) -> str:
     """Build a compact skill index for the system prompt.
 
@@ -1179,7 +1185,8 @@ def build_skills_system_prompt(
     (.hermes.md, AGENTS.md) or config.yaml ``skills.project`` section.
 
     *index_format* controls output density:
-      - ``"full"`` (default): indented category blocks with ``- name: desc``
+      - ``"keywords"`` (default): `|name:[tags]` from frontmatter, ~90% smaller than full
+      - ``"full"``: indented category blocks with ``- name: desc``
       - ``"compact"``: colon-delimited ``name:desc``, ~30% fewer chars, desc capped at 120
       - ``"lazy"``: names only, comma-separated per category, ~60% smaller than compact
       - ``"tree"``: pipe-delimited `|category:{names}`, ~80% smaller than full
