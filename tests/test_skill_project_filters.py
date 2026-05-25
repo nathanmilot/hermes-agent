@@ -306,3 +306,9 @@ class TestParseProjectSkillConfig:
         (tmp_path / "AGENTS.md").write_text("skills.index_format: lazy")
         result = parse_project_skill_config()
         assert result["index_format"] == "lazy"
+
+    def test_tree_index_format(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "AGENTS.md").write_text("skills.index_format: tree")
+        result = parse_project_skill_config()
+        assert result["index_format"] == "tree"
