@@ -1182,7 +1182,8 @@ def build_skills_system_prompt(
       - ``"full"`` (default): indented category blocks with ``- name: desc``
       - ``"compact"``: colon-delimited ``name:desc``, ~30% fewer chars, desc capped at 120
       - ``"lazy"``: names only, comma-separated per category, ~60% smaller than compact
-      - ``"tree"``: pipe-delimited lookup table, ~50% smaller than lazy, 3-5 lines total
+      - ``"tree"``: pipe-delimited `|category:{names}`, ~80% smaller than full
+      - ``"keywords"``: `|name:[tags]` from frontmatter, ~90% smaller than full
     """
     skills_dir = get_skills_dir()
     external_dirs = get_all_skills_dirs()[1:]  # skip local (index 0)
@@ -1295,6 +1296,9 @@ def build_skills_system_prompt(
             skills_by_category.setdefault(entry["category"], []).append(
                 (entry["frontmatter_name"], entry["description"])
             )
+            tags = entry.get("tags")
+            if tags:
+                skill_tags[entry["frontmatter_name"]] = [str(t) for t in tags]
 
         # Read category-level DESCRIPTION.md files
         for desc_file in iter_skill_index_files(skills_dir, "DESCRIPTION.md"):
@@ -1383,7 +1387,21 @@ def build_skills_system_prompt(
             total_skills, len(skills_by_category), index_format,
             bool(include_set), bool(exclude_set),
         )
-        if index_format == "tree":
+        if index_format == "keywords":
+            # Keyword tags from frontmatter instead of descriptions.
+            # Format: name: [tag1, tag2, ...]
+            # Smallest format — ~90% smaller than full.
+            lines_out = []
+            for category in sorted(skills_by_category.keys()):
+                seen = set()
+                for name, _desc in sorted(skills_by_category[category], key=lambda x: x[0]):
+                    if name not in seen:
+                        seen.add(name)
+                        tags = skill_tags.get(name, [])
+                        tag_str = f"[{', '.join(tags)}]" if tags else ""
+                        lines_out.append(f"|{name}:{tag_str}")
+            result = "\n".join(lines_out) + "\n"
+        elif index_format == "tree":
             # Hyper-compressed pipe-delimited lookup table (Vercel pattern).
             # ~80% smaller than full, ~50% smaller than lazy.
             # Format: [Skills]|root: <path>
@@ -1688,7 +1706,7 @@ def parse_project_skill_config(cwd: "str | None" = None, text: "str | None" = No
                         m = re.match(r'skills?\.index_format:\s*(\S+)', line, re.IGNORECASE)
                         if m:
                             fmt_val = m.group(1).strip().strip("'\"")
-                            if fmt_val in ("compact", "full", "lazy", "tree"):
+                            if fmt_val in ("compact", "full", "lazy", "tree", "keywords"):
                                 result["index_format"] = fmt_val
                             else:
                                 logger.warning("Unknown skills.index_format '%s' — using 'full'", fmt_val)
