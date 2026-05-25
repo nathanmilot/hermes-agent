@@ -1177,6 +1177,7 @@ def build_skills_system_prompt(
       - ``"full"`` (default): indented category blocks with ``- name: desc``
       - ``"compact"``: colon-delimited ``name:desc``, ~30% fewer chars, desc capped at 120
       - ``"lazy"``: names only, comma-separated per category, ~60% smaller than compact
+      - ``"tree"``: pipe-delimited lookup table, ~50% smaller than lazy, 3-5 lines total
     """
     skills_dir = get_skills_dir()
     external_dirs = get_all_skills_dirs()[1:]  # skip local (index 0)
@@ -1370,7 +1371,28 @@ def build_skills_system_prompt(
             total_skills, len(skills_by_category), index_format,
             bool(include_set), bool(exclude_set),
         )
-        if index_format == "lazy":
+        if index_format == "tree":
+            # Hyper-compressed pipe-delimited lookup table (Vercel pattern).
+            # ~80% smaller than full, ~50% smaller than lazy.
+            # Format: [Skills]|root: <path>
+            #          |IMPORTANT: <instructions>
+            #          |category:{skill1,skill2,...}
+            lines_out = []
+            lines_out.append("[Skills]|root: ~/.hermes/skills")
+            lines_out.append(
+                "|IMPORTANT: Load with skill_view(name) when a skill matches. "
+                "Stow after use (skill_manage action=stow). Patch if outdated."
+            )
+            for category in sorted(skills_by_category.keys()):
+                seen = set()
+                names = []
+                for name, _desc in sorted(skills_by_category[category], key=lambda x: x[0]):
+                    if name not in seen:
+                        seen.add(name)
+                        names.append(name)
+                lines_out.append(f"|{category}:{{{','.join(names)}}}")
+            result = "\n".join(lines_out) + "\n"
+        elif index_format == "lazy":
             # Names only — no descriptions. Agent loads skill_view to see details.
             # ~60% smaller than compact, ~80% smaller than full.
             index_lines = []
@@ -1654,7 +1676,7 @@ def parse_project_skill_config(cwd: "str | None" = None, text: "str | None" = No
                         m = re.match(r'skills?\.index_format:\s*(\S+)', line, re.IGNORECASE)
                         if m:
                             fmt_val = m.group(1).strip().strip("'\"")
-                            if fmt_val in ("compact", "full", "lazy"):
+                            if fmt_val in ("compact", "full", "lazy", "tree"):
                                 result["index_format"] = fmt_val
                             else:
                                 logger.warning("Unknown skills.index_format '%s' — using 'full'", fmt_val)
@@ -1705,7 +1727,7 @@ def parse_project_skill_config(cwd: "str | None" = None, text: "str | None" = No
                     result.setdefault(key, []).extend([str(v) for v in val])
             fmt = project_cfg.get("index_format")
             if fmt and isinstance(fmt, str):
-                if fmt in ("compact", "full"):
+                if fmt in ("compact", "full", "lazy", "tree"):
                     result.setdefault("index_format", fmt)
                 else:
                     logger.warning("Unknown skills.project.index_format '%s' in config.yaml — using 'full'", fmt)
