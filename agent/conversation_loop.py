@@ -1886,6 +1886,10 @@ def run_conversation(
                     prompt_tokens = canonical_usage.prompt_tokens
                     completion_tokens = canonical_usage.output_tokens
                     total_tokens = canonical_usage.total_tokens
+                    # Persist per-call total so build_assistant_message can stamp
+                    # token_count on each assistant message dict (fixes NULL
+                    # token_count in state.db messages table).
+                    agent._last_api_total_tokens = total_tokens
                     # Forward canonical token + cache buckets so context engines
                     # can make decisions on cache hit ratios / reasoning costs,
                     # not just legacy aggregate tokens. Legacy keys stay for
