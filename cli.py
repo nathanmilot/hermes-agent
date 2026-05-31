@@ -7192,6 +7192,7 @@ class HermesCLI:
                     tool_name=msg.get("tool_name") or msg.get("name"),
                     tool_calls=msg.get("tool_calls"),
                     tool_call_id=msg.get("tool_call_id"),
+                    token_count=msg.get("token_count"),
                     reasoning=msg.get("reasoning"),
                 )
             except Exception:
