@@ -1398,7 +1398,11 @@ def build_skills_system_prompt(
             # Category-grouped with inline tags — same line count as tree
             # but each skill shows its frontmatter tags.
             # Format: |category:{name:[tags]|name:[tags]|...}
-            lines_out = []
+            lines_out = [
+                "[Skills]|root: ~/.hermes/skills",
+                "|IMPORTANT: Load with skill_view(name) when a skill matches. "
+                "Stow after use (skill_manage action=stow). Patch if outdated.",
+            ]
             for category in sorted(skills_by_category.keys()):
                 parts = []
                 seen = set()
