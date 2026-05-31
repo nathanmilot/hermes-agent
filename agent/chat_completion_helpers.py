@@ -859,6 +859,7 @@ def build_assistant_message(agent, assistant_message, finish_reason: str) -> dic
         "content": _san_content,
         "reasoning": reasoning_text,
         "finish_reason": finish_reason,
+        "token_count": getattr(agent, "_last_api_total_tokens", None),
     }
 
     raw_reasoning_content = getattr(assistant_message, "reasoning_content", None)
