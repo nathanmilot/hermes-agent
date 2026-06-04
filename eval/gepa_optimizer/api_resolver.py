@@ -99,11 +99,28 @@ def make_hermes_litellm_judge(verbose: bool = False):
         litellm_model = model_name
 
     def judge(messages: list[dict]) -> str:
+        # deepseek-v4-pro silently drops content when system messages are present.
+        # Merge system message into user message as a prefix instead.
+        system_content = ""
+        user_messages = []
+        for m in messages:
+            if m["role"] == "system":
+                system_content += m["content"] + "\n\n"
+            else:
+                user_messages.append(m)
+        
+        if system_content and user_messages:
+            # Prepend system content to first user message
+            user_messages[0] = {
+                "role": "user",
+                "content": system_content + user_messages[0]["content"],
+            }
+        
         kwargs = {
             "model": litellm_model,
-            "messages": messages,
+            "messages": user_messages if user_messages else messages,
             "temperature": 0.0,
-            "max_tokens": 200,
+            "max_tokens": 800,  # deepseek-v4-pro reasoning model needs headroom
         }
         if api_key:
             kwargs["api_key"] = api_key
@@ -114,3 +131,78 @@ def make_hermes_litellm_judge(verbose: bool = False):
         return response.choices[0].message.content or ""
 
     return judge
+
+
+def make_hermes_reflection_lm(verbose: bool = False):
+    """Create a GEPA-compatible reflection LM callable using Hermes provider.
+    
+    Returns a callable suitable for GEPA's `reflection_lm` parameter.
+    Uses the same API key and endpoint as the active Hermes provider,
+    with higher max_tokens since reflection prompts are longer than judge calls.
+    """
+    import litellm
+
+    config = resolve_api_config()
+    api_key = config["api_key"]
+    api_base = config["api_base"]
+    model_name = config["model_name"]
+    provider_name = config["provider_name"]
+
+    if not api_key:
+        if verbose:
+            print(f"  WARNING: No API key for reflection LM (provider={provider_name})")
+        return None
+
+    # Map to litellm format
+    if provider_name == "opencode-go":
+        litellm_model = f"openai/{model_name}"
+    elif provider_name == "openrouter":
+        litellm_model = f"openrouter/{model_name}"
+    else:
+        litellm_model = model_name
+
+    if verbose:
+        print(f"  Reflection LM: {litellm_model} via {api_base}")
+
+    def reflection_lm(prompt) -> str:
+        """GEPA-compatible reflection callable.
+        
+        GEPA passes either a str or list[dict] for the prompt.
+        """
+        if isinstance(prompt, str):
+            messages = [{"role": "user", "content": prompt}]
+        else:
+            messages = list(prompt)  # copy to avoid mutating input
+        
+        # deepseek-v4-pro silently drops content with system messages.
+        # Merge system content into first user message.
+        system_content = ""
+        user_messages = []
+        for m in messages:
+            if m.get("role") == "system":
+                system_content += m.get("content", "") + "\n\n"
+            else:
+                user_messages.append(m)
+        
+        if system_content and user_messages:
+            user_messages[0] = {
+                "role": "user",
+                "content": system_content + user_messages[0].get("content", ""),
+            }
+            messages = user_messages
+
+        kwargs = {
+            "model": litellm_model,
+            "messages": messages,
+            "temperature": 0.3,
+            "max_tokens": 4000,
+        }
+        if api_key:
+            kwargs["api_key"] = api_key
+        if api_base:
+            kwargs["api_base"] = api_base
+
+        response = litellm.completion(**kwargs)
+        return response.choices[0].message.content or ""
+
+    return reflection_lm

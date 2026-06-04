@@ -35,7 +35,7 @@ from eval.gepa_optimizer.evaluator import (
     VerbosityEvaluator,
     make_litellm_judge,
 )
-from eval.gepa_optimizer.api_resolver import make_hermes_litellm_judge
+from eval.gepa_optimizer.api_resolver import make_hermes_litellm_judge, make_hermes_reflection_lm
 from eval.gepa_optimizer.config import is_gepa_enabled, require_gepa_enabled
 
 
@@ -84,6 +84,8 @@ def build_adapter(examples, judge_fn, verbose=False):
             
             scores = []
             outputs = []
+            trajectories = [] if capture_traces else None
+            
             for example in batch:
                 try:
                     s = score_candidate(
@@ -94,14 +96,27 @@ def build_adapter(examples, judge_fn, verbose=False):
                     )
                     scores.append(s)
                     outputs.append({"prevented": s > 0.5})
+                    
+                    if capture_traces:
+                        # Trajectory = raw judge context for the reflection LM
+                        trajectories.append({
+                            "guidance": guidance,
+                            "failure_pattern": example.get("failure_pattern", ""),
+                            "response_length": example.get("response_length", 0),
+                            "response_preview": example.get("response", "")[:500],
+                            "score": s,
+                            "prevented": s > 0.5,
+                        })
                 except Exception as e:
                     scores.append(0.0)
                     outputs.append({"error": str(e)})
+                    if capture_traces:
+                        trajectories.append({"error": str(e)})
             
             return EvaluationBatch(
                 outputs=outputs,
                 scores=scores,
-                trajectories=None,
+                trajectories=trajectories,
             )
         
         def make_reflective_dataset(self, candidate, eval_batch, components_to_update):
@@ -138,8 +153,9 @@ def main():
         help="LiteLLM model string for the judge/evaluator (default: deepseek/deepseek-chat)"
     )
     parser.add_argument(
-        "--reflection-model", default="anthropic/claude-sonnet-4",
-        help="LiteLLM model string for the reflection/proposer LM"
+        "--reflection-model", default=None,
+        help="LiteLLM model string for the reflection/proposer LM. "
+             "Defaults to the active Hermes provider model (deepseek-v4-pro)."
     )
     parser.add_argument(
         "--max-calls", type=int, default=100,
@@ -228,7 +244,20 @@ def main():
 
     # ── Step 4: Run GEPA optimization ────────────────────────────────
     print(f"\nStep 4: Running GEPA optimization...")
-    print(f"  Reflection model: {args.reflection_model}")
+    
+    # Resolve reflection LM
+    if args.reflection_model:
+        # User explicitly specified — use as litellm string
+        reflection_lm = args.reflection_model
+        print(f"  Reflection model: {args.reflection_model} (explicit)")
+    else:
+        # Auto-detect from Hermes config (deepseek-v4-pro via OpenCode Go)
+        reflection_lm = make_hermes_reflection_lm(verbose=True)
+        if reflection_lm is None:
+            print("  ERROR: Could not resolve reflection LM. Use --reflection-model.")
+            return 1
+        print(f"  Reflection model: auto-detected from Hermes provider")
+    
     print(f"  Max metric calls: {args.max_calls}")
     
     try:
@@ -247,9 +276,9 @@ def main():
         trainset=train[:args.max_examples],
         valset=val[:min(50, len(val))],
         adapter=adapter,
-        reflection_lm=args.reflection_model,
+        reflection_lm=reflection_lm,
         max_metric_calls=args.max_calls,
-        display_progress_bar=True,
+        display_progress_bar=False,  # disable in non-TTY/background
     )
 
     # ── Step 5: Report ───────────────────────────────────────────────
@@ -291,7 +320,7 @@ def main():
         "num_examples": len(examples),
         "num_metric_calls": args.max_calls,
         "model": args.model,
-        "reflection_model": args.reflection_model,
+        "reflection_model": args.reflection_model or "hermes-provider",
     }
     
     with open(args.output, "w") as f:
