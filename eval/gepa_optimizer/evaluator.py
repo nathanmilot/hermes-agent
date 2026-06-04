@@ -11,40 +11,53 @@ from typing import Any, Callable, Optional
 
 # ── Judge prompt template ────────────────────────────────────────────
 
-JUDGE_SYSTEM_PROMPT = """You are a strict evaluator testing whether agent guidance text
-would prevent verbosity failures. You are shown:
+JUDGE_SYSTEM_PROMPT = """You are a strict evaluator comparing two versions of agent guidance text.
 
-1. A candidate GUIDANCE block (instructions the agent will follow)
-2. A FAILURE EXAMPLE (an actual agent response that was too verbose)
+You are shown:
+1. ORIGINAL guidance — the instructions the agent actually had when it produced the failure
+2. CANDIDATE guidance — a proposed replacement
+3. FAILURE EXAMPLE — the verbose response the agent produced under the ORIGINAL guidance
 
-Your job: decide if the agent, given this guidance, would STILL produce
-this same verbose response, or would produce something more concise.
+CRITICAL CONTEXT: The failure happened WITH the original guidance active.
+The original guidance FAILED to prevent this specific verbose response.
+The candidate only gets credit if it adds something the original lacked.
+
+Your job: does the CANDIDATE guidance add new, specific prohibitions or
+stronger language that would change the agent's behavior, compared to the original?
 
 Consider:
-- Does the guidance explicitly prohibit the specific failure pattern?
-- Is the prohibition strong enough that a reasonable agent would obey it?
-- Would the guidance make the agent change its response structure?
+- Does the candidate add NEW rules the original didn't have?
+- Is the candidate's language STRONGER (e.g., "NEVER do X" vs "try to avoid X")?
+- Would the specific failure pattern (filler opening, redundancy, etc.) be
+  explicitly addressed by the candidate's ADDITIONS?
+
+If the candidate is identical or only trivially reworded: would_prevent = false.
+If the candidate adds meaningful new constraints targeting this pattern: would_prevent = true.
 
 Respond with ONLY a JSON object:
 {
   "would_prevent": true/false,
   "confidence": 0.0-1.0,
-  "reasoning": "one sentence explaining your decision"
+  "reasoning": "one sentence citing what the candidate adds that the original lacked"
 }"""
 
-JUDGE_USER_TEMPLATE = """## Candidate Guidance
-{guidance}
+JUDGE_USER_TEMPLATE = """## Original Guidance (active when failure occurred)
+{original_guidance}
+
+## Candidate Guidance (proposed replacement)
+{candidate_guidance}
 
 ## Failure Example
 Pattern: {failure_pattern}
 Response length: {response_length} chars
 
-The agent produced this response:
+The agent produced this response under the ORIGINAL guidance:
 ---
 {response}
 ---
 
-Would the candidate guidance above prevent this verbose response?"""
+Does the CANDIDATE guidance add specific new constraints that would prevent this?
+Answer ONLY with JSON."""
 
 
 # ── Scoring ──────────────────────────────────────────────────────────
@@ -53,6 +66,7 @@ def score_candidate(
     guidance_blocks: dict[str, str],
     examples: list[dict],
     judge_fn,  # Callable[[list[dict]], str]
+    original_guidance: dict[str, str] | None = None,
     verbose: bool = False,
 ) -> float:
     """Score a candidate guidance block against failure examples.
@@ -61,14 +75,23 @@ def score_candidate(
     Higher = better (the guidance text is more effective).
 
     Args:
-        guidance_blocks: Dict of guidance name -> guidance text
+        guidance_blocks: Dict of guidance name -> candidate guidance text
         examples: List of failure examples from dataset.build_gepa_dataset()
         judge_fn: Function that takes a prompt string and returns LLM response
+        original_guidance: The seed/original guidance for comparison.
+                          If None, candidate is compared against itself (always score 0).
         verbose: Print per-example results
     """
-    # Combine all guidance blocks into a single text for the judge
-    combined_guidance = "\n\n".join(
+    # Combine guidance blocks into single text for the judge
+    candidate_text = "\n\n".join(
         f"# {name}\n{text}" for name, text in guidance_blocks.items()
+    )
+    
+    if original_guidance is None:
+        original_guidance = guidance_blocks
+    
+    original_text = "\n\n".join(
+        f"# {name}\n{text}" for name, text in original_guidance.items()
     )
 
     prevented = 0
@@ -80,7 +103,8 @@ def score_candidate(
         response_len = example.get("response_length", len(response))
 
         prompt = JUDGE_USER_TEMPLATE.format(
-            guidance=combined_guidance,
+            original_guidance=original_text,
+            candidate_guidance=candidate_text,
             failure_pattern=pattern,
             response_length=response_len,
             response=response[:2000],  # cap for token budget

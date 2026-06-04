@@ -62,7 +62,7 @@ CURRENT_TASK_COMPLETION = (
 
 # ── GEPA adapter ─────────────────────────────────────────────────────
 
-def build_adapter(examples, judge_fn, verbose=False):
+def build_adapter(examples, judge_fn, seed_guidance=None, verbose=False):
     """Build a GEPA-compatible adapter for guidance optimization."""
     import gepa
     from gepa.core.adapter import GEPAAdapter, EvaluationBatch
@@ -70,9 +70,13 @@ def build_adapter(examples, judge_fn, verbose=False):
     class GuidanceAdapter:
         """GEPA adapter that evaluates guidance text against failure examples."""
         
-        def __init__(self, examples, judge_fn, verbose=False):
+        # Tell GEPA to use its default proposer (we don't implement custom proposal logic)
+        propose_new_texts = None
+        
+        def __init__(self, examples, judge_fn, seed_guidance, verbose=False):
             self.examples = examples
             self.judge_fn = judge_fn
+            self.seed_guidance = seed_guidance or {}
             self.verbose = verbose
         
         def evaluate(self, batch, candidate, capture_traces=False):
@@ -92,6 +96,7 @@ def build_adapter(examples, judge_fn, verbose=False):
                         guidance_blocks=guidance,
                         examples=[example],
                         judge_fn=self.judge_fn,
+                        original_guidance=self.seed_guidance,
                         verbose=self.verbose,
                     )
                     scores.append(s)
@@ -139,7 +144,7 @@ def build_adapter(examples, judge_fn, verbose=False):
                 dataset[comp] = records[:10]  # cap for token budget
             return dataset
     
-    return GuidanceAdapter(examples, judge_fn, verbose)
+    return GuidanceAdapter(examples, judge_fn, seed_guidance, verbose)
 
 
 # ── Main ─────────────────────────────────────────────────────────────
@@ -232,6 +237,7 @@ def main():
         guidance_blocks=seed_guidance,
         examples=val[:20],  # use a subset for speed
         judge_fn=judge_fn,
+        original_guidance=seed_guidance,  # compare seed vs itself = baseline 0
         verbose=args.verbose,
     )
     print(f"  Seed score: {seed_score:.3f} ({int(seed_score * 20)}/20 prevented)")
@@ -266,7 +272,7 @@ def main():
         print("  ERROR: gepa not installed. Run: pip install gepa")
         return 1
 
-    adapter = build_adapter(val[:50], judge_fn, verbose=args.verbose)
+    adapter = build_adapter(val[:50], judge_fn, seed_guidance=seed_guidance, verbose=args.verbose)
 
     result = gepa.optimize(
         seed_candidate={
@@ -293,6 +299,7 @@ def main():
         guidance_blocks=best,
         examples=val,
         judge_fn=judge_fn,
+        original_guidance=seed_guidance,
         verbose=False,
     )
     
