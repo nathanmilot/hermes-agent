@@ -35,7 +35,11 @@ from eval.gepa_optimizer.evaluator import (
     VerbosityEvaluator,
     make_litellm_judge,
 )
-from eval.gepa_optimizer.api_resolver import make_hermes_litellm_judge, make_hermes_reflection_lm
+from eval.gepa_optimizer.api_resolver import (
+    make_hermes_litellm_judge, 
+    make_hermes_reflection_lm,
+    resolve_api_config,
+)
 from eval.gepa_optimizer.config import is_gepa_enabled, require_gepa_enabled
 
 
@@ -62,7 +66,7 @@ CURRENT_TASK_COMPLETION = (
 
 # ── GEPA adapter ─────────────────────────────────────────────────────
 
-def build_adapter(examples, judge_fn, seed_guidance=None, verbose=False):
+def build_adapter(examples, judge_fn, seed_guidance=None, reflection_lm=None, verbose=False):
     """Build a GEPA-compatible adapter for guidance optimization."""
     import gepa
     from gepa.core.adapter import GEPAAdapter, EvaluationBatch
@@ -70,14 +74,64 @@ def build_adapter(examples, judge_fn, seed_guidance=None, verbose=False):
     class GuidanceAdapter:
         """GEPA adapter that evaluates guidance text against failure examples."""
         
-        # Tell GEPA to use its default proposer (we don't implement custom proposal logic)
-        propose_new_texts = None
-        
-        def __init__(self, examples, judge_fn, seed_guidance, verbose=False):
+        def __init__(self, examples, judge_fn, seed_guidance, reflection_lm, verbose=False):
             self.examples = examples
             self.judge_fn = judge_fn
             self.seed_guidance = seed_guidance or {}
+            self.reflection_lm = reflection_lm
             self.verbose = verbose
+        
+        def propose_new_texts(self, candidate, reflective_dataset, components_to_update):
+            """Custom proposer optimized for deepseek-v4-flash.
+            
+            Uses a simple, direct prompt asking for specific rewrites
+            rather than GEPA's complex default reflection format which
+            reasoning models struggle with.
+            """
+            new_texts = {}
+            
+            for comp_name in components_to_update:
+                current_text = candidate.get(comp_name, "")
+                
+                # Gather failure examples from the reflective dataset
+                failures = reflective_dataset.get(comp_name, [])
+                failure_summary = ""
+                for f in failures[:5]:  # cap for token budget
+                    fb = f.get("Feedback", "")
+                    failure_summary += f"- {fb}\n"
+                
+                if not failure_summary:
+                    continue
+                
+                prompt = f"""Rewrite the following agent guidance text to fix specific failures.
+
+## Current Guidance
+{current_text}
+
+## Failures (this guidance was active when these happened)
+{failure_summary}
+
+## Instructions
+Rewrite the guidance to add specific prohibitions that would prevent these failures.
+- Add explicit "NEVER" or "DON'T" rules for the exact failure patterns shown
+- Make language stronger than the original
+- Keep the same structure (starts with a header like "# Cost awareness")
+- Be concise — every word must pull weight
+- Return ONLY the rewritten guidance text, no explanation
+
+Rewritten guidance:"""
+
+                try:
+                    new_text = self.reflection_lm(prompt)
+                    if new_text and len(new_text) > 20:
+                        new_texts[comp_name] = new_text.strip()
+                        if self.verbose:
+                            print(f"  Proposed {comp_name}: {len(new_text)} chars")
+                except Exception as e:
+                    if self.verbose:
+                        print(f"  [!] Proposal failed for {comp_name}: {e}")
+            
+            return new_texts
         
         def evaluate(self, batch, candidate, capture_traces=False):
             """Score candidate guidance against a batch of failure examples."""
@@ -144,7 +198,7 @@ def build_adapter(examples, judge_fn, seed_guidance=None, verbose=False):
                 dataset[comp] = records[:10]  # cap for token budget
             return dataset
     
-    return GuidanceAdapter(examples, judge_fn, seed_guidance, verbose)
+    return GuidanceAdapter(examples, judge_fn, seed_guidance, reflection_lm, verbose)
 
 
 # ── Main ─────────────────────────────────────────────────────────────
@@ -251,17 +305,33 @@ def main():
     # ── Step 4: Run GEPA optimization ────────────────────────────────
     print(f"\nStep 4: Running GEPA optimization...")
     
-    # Resolve reflection LM
+    # Resolve reflection LM — need both a string (for gepa.optimize) and
+    # a callable (for our custom propose_new_texts).
     if args.reflection_model:
-        # User explicitly specified — use as litellm string
-        reflection_lm = args.reflection_model
+        reflection_lm_str = args.reflection_model
+        # Build a callable using the api_resolver's credentials
+        config = resolve_api_config()
+        _model = args.reflection_model
+        _key = config.get("api_key", "")
+        _base = config.get("api_base", "")
+        import litellm
+        def _reflect_fn(prompt):
+            kwargs = {"model": _model, "messages": [{"role": "user", "content": prompt}],
+                      "temperature": 0.3, "max_tokens": 2000}
+            if _key: kwargs["api_key"] = _key
+            if _base: kwargs["api_base"] = _base
+            resp = litellm.completion(**kwargs)
+            return resp.choices[0].message.content or ""
+        reflection_lm_fn = _reflect_fn
         print(f"  Reflection model: {args.reflection_model} (explicit)")
     else:
         # Auto-detect from Hermes config (deepseek-v4-pro via OpenCode Go)
-        reflection_lm = make_hermes_reflection_lm(verbose=True)
-        if reflection_lm is None:
+        reflection_lm_fn = make_hermes_reflection_lm(verbose=True)
+        if reflection_lm_fn is None:
             print("  ERROR: Could not resolve reflection LM. Use --reflection-model.")
             return 1
+        # For gepa.optimize(), the callable works as reflection_lm too
+        reflection_lm_str = None
         print(f"  Reflection model: auto-detected from Hermes provider")
     
     print(f"  Max metric calls: {args.max_calls}")
@@ -272,7 +342,8 @@ def main():
         print("  ERROR: gepa not installed. Run: pip install gepa")
         return 1
 
-    adapter = build_adapter(val[:50], judge_fn, seed_guidance=seed_guidance, verbose=args.verbose)
+    adapter = build_adapter(val[:50], judge_fn, seed_guidance=seed_guidance, 
+                           reflection_lm=reflection_lm_fn, verbose=args.verbose)
 
     result = gepa.optimize(
         seed_candidate={
@@ -282,7 +353,7 @@ def main():
         trainset=train[:args.max_examples],
         valset=val[:min(50, len(val))],
         adapter=adapter,
-        reflection_lm=reflection_lm,
+        reflection_lm=reflection_lm_fn if reflection_lm_str is None else reflection_lm_str,
         max_metric_calls=args.max_calls,
         display_progress_bar=False,  # disable in non-TTY/background
     )
