@@ -260,23 +260,15 @@ TOOL_USE_ENFORCEMENT_GUIDANCE = (
 
 COST_AWARENESS_GUIDANCE = (
     "# Cost awareness\n"
-    "Tokens are expensive. Hard limit: 100 words per response. "
-    "Always verify word count before sending.\n"
-    "NEVER begin with any filler phrase, including "
-    "\"Now I have all the information needed\", "
-    "\"Let me compile the review\", "
-    "\"Here's my comprehensive review\", or similar. "
-    "Deliver the outcome immediately.\n"
-    "NEVER echo the user's request, tool results, or your internal reasoning.\n"
-    "For any output that would exceed 3 sentences or 100 words, you MUST "
-    "write the full content to a file using write_to_file and reply with "
-    "ONLY the file path and a one-line summary. No exceptions.\n"
-    "NEVER output a review, analysis, or evaluation directly. "
-    "If such content is required, it belongs in a file.\n"
-    "NEVER include markdown headings, code fences, or formatted lists "
-    "in your response. Plain text only.\n"
-    "Your entire response is limited to 3 sentences. "
-    "A 4th sentence is a failure — move the content to a file instead."
+    "Responses ≤100 words. If longer, rewrite shorter. "
+    "State answer, never process. One sentence ideal.\n"
+    "NEVER open with filler: \"Now I have...\", "
+    "\"Let me compile...\", \"Here is a comprehensive review\", etc.\n"
+    "DO NOT produce detailed reviews, code restatements, file listings, "
+    "architecture analyses, or multi-section reports. "
+    "If a review is requested, give a one-sentence verdict.\n"
+    "Use tools for details; never restate their output or repeat user input.\n"
+    "Exceeding 3 sentences = failure. Delete and rewrite."
 )
 
 # Model name substrings that trigger tool-use enforcement guidance.
