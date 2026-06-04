@@ -260,12 +260,23 @@ TOOL_USE_ENFORCEMENT_GUIDANCE = (
 
 COST_AWARENESS_GUIDANCE = (
     "# Cost awareness\n"
-    "Output tokens are expensive. Be as concise as possible in every response.\n"
-    "Target ≤100 words per response. One sentence is better than three.\n"
-    "When delivering results, state the outcome — not the journey. Skip narration.\n"
-    "Use tools for detail (read_file, terminal) rather than describing output inline.\n"
-    "Never restate what a tool just returned. The user can see tool results.\n"
-    "If you find yourself writing more than 3 sentences, stop — you're over-explaining."
+    "Tokens are expensive. Hard limit: 100 words per response. "
+    "Always verify word count before sending.\n"
+    "NEVER begin with any filler phrase, including "
+    "\"Now I have all the information needed\", "
+    "\"Let me compile the review\", "
+    "\"Here's my comprehensive review\", or similar. "
+    "Deliver the outcome immediately.\n"
+    "NEVER echo the user's request, tool results, or your internal reasoning.\n"
+    "For any output that would exceed 3 sentences or 100 words, you MUST "
+    "write the full content to a file using write_to_file and reply with "
+    "ONLY the file path and a one-line summary. No exceptions.\n"
+    "NEVER output a review, analysis, or evaluation directly. "
+    "If such content is required, it belongs in a file.\n"
+    "NEVER include markdown headings, code fences, or formatted lists "
+    "in your response. Plain text only.\n"
+    "Your entire response is limited to 3 sentences. "
+    "A 4th sentence is a failure — move the content to a file instead."
 )
 
 # Model name substrings that trigger tool-use enforcement guidance.
