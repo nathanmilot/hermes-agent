@@ -47,6 +47,8 @@ export interface ThemeColors {
   diffRemovedWord: string
 
   shellDollar: string
+
+  assistantText: string
 }
 
 export interface ThemeBrand {
@@ -64,6 +66,7 @@ export interface Theme {
   brand: ThemeBrand
   bannerLogo: string
   bannerHero: string
+  bannerHeroSmall: string
 }
 
 // ── Color math ───────────────────────────────────────────────────────
@@ -391,17 +394,97 @@ export const LIGHT_SEEDS: ThemeSeeds = {
 }
 
 export const DARK_THEME: Theme = {
-  color: buildPalette(DARK_SEEDS, false),
+  color: {
+    primary: '#FFD700',
+    accent: '#FFBF00',
+    border: '#CD7F32',
+    text: '#FFF8DC',
+    muted: '#CC9B1F',
+    // Bumped from the old `#B8860B` darkgoldenrod (~53% luminance) which
+    // read as barely-visible on dark terminals for long body text.  The
+    // new value sits ~60% luminance — readable without losing the "muted /
+    // secondary" semantic.  Field labels still use `label` (65%) which
+    // stays brighter so hierarchy holds.
+    completionBg: '#1a1a2e',
+    completionCurrentBg: '#333355',
+    completionMetaBg: '#1a1a2e',
+    completionMetaCurrentBg: '#333355',
+
+    label: '#DAA520',
+    ok: '#4caf50',
+    error: '#ef5350',
+    warn: '#ffa726',
+
+    prompt: '#FFF8DC',
+    // sessionLabel/sessionBorder intentionally track the `dim` value — they
+    // are "same role, same colour" by design.  fromSkin's banner_dim fallback
+    // relies on this pairing (#11300).
+    sessionLabel: '#CC9B1F',
+    sessionBorder: '#CC9B1F',
+
+    statusBg: '#1a1a2e',
+    statusFg: '#C0C0C0',
+    statusGood: '#8FBC8F',
+    statusWarn: '#FFD700',
+    statusBad: '#FF8C00',
+    statusCritical: '#FF6B6B',
+    selectionBg: '#3a3a55',
+
+    diffAdded: 'rgb(220,255,220)',
+    diffRemoved: 'rgb(255,220,220)',
+    diffAddedWord: 'rgb(36,138,61)',
+    diffRemovedWord: 'rgb(207,34,46)',
+    shellDollar: '#4dabf7',
+    assistantText: '#6366f1'
+  },
+
   brand: BRAND,
   bannerLogo: '',
-  bannerHero: ''
+  bannerHero: '',
+  bannerHeroSmall: ''
 }
 
 export const LIGHT_THEME: Theme = {
-  color: buildPalette(LIGHT_SEEDS, true),
+  color: {
+    primary: '#8B6914',
+    accent: '#A0651C',
+    border: '#7A4F1F',
+    text: '#3D2F13',
+    muted: '#7A5A0F',
+    completionBg: '#F5F5F5',
+    completionCurrentBg: mix('#F5F5F5', '#A0651C', 0.25),
+    completionMetaBg: '#F5F5F5',
+    completionMetaCurrentBg: mix('#F5F5F5', '#A0651C', 0.25),
+
+    label: '#7A5A0F',
+    ok: '#2E7D32',
+    error: '#C62828',
+    warn: '#E65100',
+
+    prompt: '#2B2014',
+    sessionLabel: '#7A5A0F',
+    sessionBorder: '#7A5A0F',
+
+    statusBg: '#F5F5F5',
+    statusFg: '#333333',
+    statusGood: '#2E7D32',
+    statusWarn: '#8B6914',
+    statusBad: '#D84315',
+    statusCritical: '#B71C1C',
+    selectionBg: '#D4E4F7',
+
+    diffAdded: 'rgb(200,240,200)',
+    diffRemoved: 'rgb(240,200,200)',
+    diffAddedWord: 'rgb(27,94,32)',
+    diffRemovedWord: 'rgb(183,28,28)',
+    shellDollar: '#1565C0',
+    assistantText: '#4f46e5'
+  },
+
   brand: BRAND,
   bannerLogo: '',
-  bannerHero: ''
+  bannerHero: '',
+  bannerHeroSmall: ''
 }
 
 // ── Background-aware readability adaptation ─────────────────────────
@@ -815,6 +898,7 @@ export function fromSkin(
   branding: SkinBranding,
   bannerLogo = '',
   bannerHero = '',
+  bannerHeroSmall = '',
   toolPrefix = '',
   helpHeader = ''
 ): Theme {
@@ -916,29 +1000,57 @@ export function fromSkin(
 
   return normalizeThemeForAnsiLightTerminal(
     {
-      // The element tokens theme-sdk introduced (ui_primary, ui_text,
-      // ui_border, ui_ok/warn/error, ui_tool, ui_thinking, shell_dollar,
-      // status_bar_*, diff_*) are read into `seeds`/`assembled` above and
-      // flow through buildPalette → adaptColorsToBackground, so `adapted`
-      // already honors them AND applies #20379's contrast/polarity machinery.
-      // Emitting a hand-mapped color block here would bypass that adaptation
-      // and regress theme quality.
-      color: adapted,
+      color: {
+        primary: c('ui_primary') ?? c('banner_title') ?? d.color.primary,
+        accent,
+        border: c('ui_border') ?? c('banner_border') ?? d.color.border,
+        text: c('ui_text') ?? c('banner_text') ?? d.color.text,
+        muted,
+        completionBg,
+        completionCurrentBg,
+        completionMetaBg,
+        completionMetaCurrentBg,
 
-      brand: {
-        name: branding.agent_name ?? d.brand.name,
-        icon: d.brand.icon,
-        prompt: cleanPromptSymbol(branding.prompt_symbol, d.brand.prompt),
-        welcome: branding.welcome ?? d.brand.welcome,
-        goodbye: branding.goodbye ?? d.brand.goodbye,
-        tool: toolPrefix || d.brand.tool,
-        helpHeader: branding.help_header ?? (helpHeader || d.brand.helpHeader)
-      },
+        label: c('ui_label') ?? d.color.label,
+        ok: c('ui_ok') ?? d.color.ok,
+        error: c('ui_error') ?? d.color.error,
+        warn: c('ui_warn') ?? d.color.warn,
 
-      bannerLogo,
-      bannerHero
+        prompt: c('prompt') ?? c('banner_text') ?? d.color.prompt,
+        sessionLabel: c('session_label') ?? muted,
+        sessionBorder: c('session_border') ?? muted,
+
+        statusBg: d.color.statusBg,
+        statusFg: d.color.statusFg,
+        statusGood: c('ui_ok') ?? d.color.statusGood,
+        statusWarn: c('ui_warn') ?? d.color.statusWarn,
+        statusBad: d.color.statusBad,
+        statusCritical: d.color.statusCritical,
+        selectionBg:
+          c('selection_bg') ??
+          c('completion_menu_current_bg') ??
+          (hasSkinColors ? completionCurrentBg : d.color.selectionBg),
+
+      diffAdded: c('diff_added') ?? d.color.diffAdded,
+      diffRemoved: c('diff_removed') ?? d.color.diffRemoved,
+      diffAddedWord: c('diff_added_word') ?? d.color.diffAddedWord,
+      diffRemovedWord: c('diff_removed_word') ?? d.color.diffRemovedWord,
+      shellDollar: c('shell_dollar') ?? d.color.shellDollar,
+      assistantText: c('assistant_text') ?? d.color.assistantText
     },
-    process.env,
-    isLight
-  )
+
+    brand: {
+      name: branding.agent_name ?? d.brand.name,
+      icon: d.brand.icon,
+      prompt: cleanPromptSymbol(branding.prompt_symbol, d.brand.prompt),
+      welcome: branding.welcome ?? d.brand.welcome,
+      goodbye: branding.goodbye ?? d.brand.goodbye,
+      tool: toolPrefix || d.brand.tool,
+      helpHeader: branding.help_header ?? (helpHeader || d.brand.helpHeader)
+    },
+
+    bannerLogo,
+    bannerHero,
+    bannerHeroSmall
+  }, process.env, DEFAULT_LIGHT_MODE)
 }

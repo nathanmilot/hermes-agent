@@ -12961,9 +12961,10 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 except Exception:
                     pass
 
+                _is_root = os.geteuid() == 0 if hasattr(os, "geteuid") else False
                 for scope, scope_cmd in [
                     ("user", ["systemctl", "--user"]),
-                    ("system", ["systemctl"]),
+                    ("system", ["sudo", "systemctl"] if not _is_root else ["systemctl"]),
                 ]:
                     try:
                         result = subprocess.run(

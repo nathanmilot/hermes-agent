@@ -563,6 +563,7 @@ const isPasteResultPromise = (
 ): value is Promise<PasteResult> => !!value && typeof (value as PromiseLike<PasteResult>).then === 'function'
 
 export function TextInput({
+  color,
   columns = 80,
   value,
   onChange,
@@ -1406,14 +1407,7 @@ export function TextInput({
       ref={boxRef}
       width={columns}
     >
-      {/* Explicit theme color on the typed text — default fg tracks the HOST
-          terminal's polarity, not the skin's, so a live dark-skin repaint on a
-          light terminal would otherwise leave the input black-on-black. chalk
-          re-opens the outer color after embedded [39m closes (placeholder
-          chips), and INV cursor/selection cells don't touch fg. */}
-      <Text color={color} wrap="wrap">
-        {rendered}
-      </Text>
+      <Text color={color} wrap="wrap">{rendered}</Text>
     </Box>
   )
 }
@@ -1434,7 +1428,6 @@ export interface PasteEvent {
 }
 
 interface TextInputProps {
-  /** Hex color for typed text (theme text); terminal default when omitted. */
   color?: string
   columns?: number
   focus?: boolean

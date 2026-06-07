@@ -164,11 +164,12 @@ class MemoryStore:
     # turn to budget exhaustion and suppress the user's reply (issue #42405).
     _MAX_CONSOLIDATION_FAILURES_PER_TURN = 3
 
-    def __init__(self, memory_char_limit: int = 2200, user_char_limit: int = 1375):
+    def __init__(self, memory_char_limit: int = 2200, user_char_limit: int = 1375, compact: bool = True):
         self.memory_entries: List[str] = []
         self.user_entries: List[str] = []
         self.memory_char_limit = memory_char_limit
         self.user_char_limit = user_char_limit
+        self._compact = compact
         # Frozen snapshot for system prompt -- set once at load_from_disk()
         self._system_prompt_snapshot: Dict[str, str] = {"memory": "", "user": ""}
         # Per-turn counter of failed at-capacity consolidation attempts; reset
@@ -232,13 +233,10 @@ class MemoryStore:
         # Sanitize entries for the system-prompt snapshot only.  Live state
         # (memory_entries / user_entries) keeps the raw text so the user
         # can see + remove poisoned entries via the memory tool.
-        sanitized_memory = self._sanitize_entries_for_snapshot(self.memory_entries, "MEMORY.md")
-        sanitized_user = self._sanitize_entries_for_snapshot(self.user_entries, "USER.md")
-
         # Capture frozen snapshot for system prompt injection
         self._system_prompt_snapshot = {
-            "memory": self._render_block("memory", sanitized_memory),
-            "user": self._render_block("user", sanitized_user),
+            "memory": self._render_block("memory", self.memory_entries, self._compact),
+            "user": self._render_block("user", self.user_entries, self._compact),
         }
 
     @staticmethod
@@ -730,13 +728,27 @@ class MemoryStore:
         resp["note"] = "Write saved. This update is complete — do not repeat it."
         return resp
 
-    def _render_block(self, target: str, entries: List[str]) -> str:
-        """Render a system prompt block with header and usage indicator."""
+    def _render_block(self, target: str, entries: List[str], compact: bool = False) -> str:
+        """Render a system prompt block with header and usage indicator.
+
+        In compact mode, each entry is truncated to its first line (summary)
+        with '…' appended if there is more content. The full entries remain
+        retrievable via the memory tool.
+        """
         if not entries:
             return ""
 
         limit = self._char_limit(target)
-        content = ENTRY_DELIMITER.join(entries)
+        if compact:
+            summaries = []
+            for entry in entries:
+                first_line = entry.split("\n", 1)[0]
+                if len(entry) > len(first_line):
+                    first_line += "…"
+                summaries.append(first_line)
+            content = ENTRY_DELIMITER.join(summaries)
+        else:
+            content = ENTRY_DELIMITER.join(entries)
         current = len(content)
         pct = min(100, int((current / limit) * 100)) if limit > 0 else 0
 

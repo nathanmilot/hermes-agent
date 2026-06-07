@@ -2845,6 +2845,7 @@ def resolve_skin() -> dict:
             "branding": skin.branding,
             "banner_logo": skin.banner_logo,
             "banner_hero": skin.banner_hero,
+            "banner_hero_small": skin.banner_hero_small,
             "tool_prefix": skin.tool_prefix,
             "help_header": (skin.branding or {}).get("help_header", ""),
         }
@@ -4516,10 +4517,23 @@ def _session_info(agent, session: dict | None = None) -> dict:
         info["update_command"] = recommended_update_command()
     except Exception:
         pass
-    if agent is not None and not (session or {}).get("_compute_host_active"):
-        warn = _probe_credentials(agent)
-        if warn:
-            info["credential_warning"] = warn
+    warn = _probe_credentials(agent)
+    if warn:
+        info["credential_warning"] = warn
+    # Optimization indicators — show which cost-saving features are active
+    try:
+        from agent.prompt_builder import parse_project_skill_config
+        cfg = parse_project_skill_config()
+        info["index_format"] = cfg.get("index_format", "full")
+        info["skill_filter_active"] = bool(
+            cfg.get("include") or cfg.get("exclude")
+            or cfg.get("categories_include") or cfg.get("categories_exclude")
+        )
+    except Exception:
+        info["index_format"] = "full"
+        info["skill_filter_active"] = False
+    info["max_tokens"] = getattr(agent, "max_tokens", None)
+    info["cost_awareness"] = True  # COST_AWARENESS_GUIDANCE always injected
     return info
 
 
@@ -9986,6 +10000,26 @@ def _(rid, params: dict) -> dict:
             f"Agent Running: {'Yes' if session.get('running') else 'No'}",
         ]
     )
+    # Optimization indicators
+    try:
+        from agent.prompt_builder import parse_project_skill_config
+        cfg = parse_project_skill_config()
+        fmt = cfg.get("index_format", "full")
+        filter_active = bool(
+            cfg.get("include") or cfg.get("exclude")
+            or cfg.get("categories_include") or cfg.get("categories_exclude")
+        )
+        lines.append("")
+        lines.append("⚡ Optimization:")
+        lines.append(f"  Index format: {fmt}")
+        lines.append(f"  Skill filter: {'active' if filter_active else 'inactive'}")
+        if agent is not None:
+            mt = getattr(agent, "max_tokens", None)
+            if mt:
+                lines.append(f"  Output cap: {mt:,} tokens/response")
+            lines.append(f"  Cost awareness: active")
+    except Exception:
+        pass
     return _ok(rid, {"output": "\n".join(lines)})
 
 
