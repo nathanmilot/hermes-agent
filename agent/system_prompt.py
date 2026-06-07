@@ -23,6 +23,7 @@ from agent.prompt_builder import (
     USER_PROFILE_GUIDANCE, PARALLEL_TOOL_CALL_GUIDANCE, PLATFORM_HINTS, SESSION_SEARCH_GUIDANCE,
     SKILLS_GUIDANCE, STEER_CHANNEL_NOTE, TASK_COMPLETION_GUIDANCE, TELEGRAM_RICH_MESSAGES_HINT,
     TOOL_USE_ENFORCEMENT_GUIDANCE, TOOL_USE_ENFORCEMENT_MODELS, drain_truncation_warnings,
+    COST_AWARENESS_GUIDANCE, parse_project_skill_config,
 )
 from agent import prompt_builder as _pb
 from agent.runtime_cwd import resolve_context_cwd
@@ -307,8 +308,17 @@ def _skills_prompt(agent: Any) -> str:
         _compact_cats = coding_compact_skill_categories(platform=agent.platform, cwd=resolve_context_cwd())
     except Exception:
         _compact_cats = frozenset()
+    # Parse project-scoped skill config from context files / config.yaml.
+    # Use TERMINAL_CWD for gateway-mode sessions so we look at the user's
+    # project directory, not the hermes-agent install directory.
+    project_cfg = parse_project_skill_config(cwd=os.getenv("TERMINAL_CWD") or None)
     return _pb.build_skills_system_prompt(available_tools=agent.valid_tool_names, available_toolsets=avail_toolsets,
-                                         compact_categories=_compact_cats or None, skills_dir_override=_agent_skills_dir(agent))
+                                         compact_categories=_compact_cats or None, skills_dir_override=_agent_skills_dir(agent),
+                                         skill_include=project_cfg.get("include"),
+                                         skill_exclude=project_cfg.get("exclude"),
+                                         categories_include=project_cfg.get("categories_include"),
+                                         categories_exclude=project_cfg.get("categories_exclude"),
+                                         index_format=project_cfg.get("index_format", "keywords"))
 
 
 def _bot_mode_parts(agent: Any) -> List[str]:
@@ -602,6 +612,8 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     _help_guidance_slot = len(stable_parts)
     stable_parts.append(HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS)
     stable_parts.extend(_guidance_parts(agent))
+    # Cost awareness — injected for all sessions since output tokens dominate cost
+    stable_parts.append(COST_AWARENESS_GUIDANCE)
     skills_prompt = _skills_prompt(agent)
     # Skill-pointer variant requires BOTH skill_view AND the hermes-agent skill
     # in the rendered index (pure string check — inherits the index's stability).

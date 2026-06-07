@@ -21,7 +21,7 @@ from tools.skills_tool_setup import (  # noqa: F401
     SkillReadinessStatus, _build_setup_note, _capture_required_environment_variables,
     _get_required_environment_variables, _is_env_var_persisted, _is_remote_env_backend)
 from tools.skills_tool_plugin import (  # noqa: F401
-    MAX_DESCRIPTION_LENGTH, MAX_NAME_LENGTH, _INJECTION_PATTERNS, _fail, _json,
+    MAX_DESCRIPTION_LENGTH, MAX_NAME_LENGTH, SKILL_CONTENT_MAX_CHARS, _INJECTION_PATTERNS, _fail, _json,
     _mark_background_review_read, _preprocess_skill, _read_skill_text, _safe_frontmatter,
     _serve_plugin_skill, _serve_skill_file, _truncate_description)
 from tools.skills_tool_dedup import (  # noqa: F401
@@ -576,6 +576,13 @@ def skill_view(
                 org_provenance, header = _org_provenance_header(skill_dir, active_skills_dir)
             except Exception:
                 logger.debug("Could not resolve org provenance for %s", skill_name, exc_info=True)
+        # Truncate verbose skill content to save output tokens
+        if len(rendered_content) > SKILL_CONTENT_MAX_CHARS:
+            rendered_content = (
+                rendered_content[:SKILL_CONTENT_MAX_CHARS]
+                + f"\n\n[...truncated {len(rendered_content) - SKILL_CONTENT_MAX_CHARS:,} chars. "
+                + "Load linked files with skill_view(name, file_path='references/...') for full content.]"
+            )
         result = {
             "success": True, "name": skill_name, "description": frontmatter.get("description", ""),
             "tags": tags, "related_skills": related_skills, "content": header + rendered_content,

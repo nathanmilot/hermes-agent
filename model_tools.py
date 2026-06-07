@@ -39,6 +39,7 @@ def suppress_post_tool_call_hook():
 
 # Platform-bundle names already flagged in disabled_toolsets (advisory logged once per name).
 _WARNED_DISABLED_BUNDLES: set = set()
+TOOL_RESULT_MAX_CHARS = 8000  # truncate verbose tool results to save output tokens
 
 
 def _is_delegated_child_context() -> bool:
@@ -870,7 +871,16 @@ def handle_function_call(
                                enabled_tools=enabled_tools, skip_tool_execution_middleware=skip_tool_execution_middleware)
         duration_ms = _elapsed_ms(start)
         _emit(result, duration_ms=duration_ms)
-        return _apply_transform_tool_result_hook(function_name, function_args, result, duration_ms, ids)
+        result = _apply_transform_tool_result_hook(function_name, function_args, result, duration_ms, ids)
+        # Truncate verbose tool results to save output tokens.
+        # The agent can re-run the tool or use read_file for full output.
+        if isinstance(result, str) and len(result) > TOOL_RESULT_MAX_CHARS:
+            result = (
+                result[:TOOL_RESULT_MAX_CHARS]
+                + f"\n\n[OUTPUT TRUNCATED: {len(result) - TOOL_RESULT_MAX_CHARS:,} chars omitted. "
+                + "Re-run with more specific parameters for full output.]"
+            )
+        return result
 
     except Exception as e:
         error_msg = f"Error executing {function_name}: {str(e)}"

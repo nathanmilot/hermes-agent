@@ -75,11 +75,13 @@ class MemoryStore:
     _MAX_CONSOLIDATION_FAILURES_PER_TURN = 3
 
     def __init__(self, memory_char_limit: int = 2200, user_char_limit: int = 1375, *,
-                 memory_enabled: bool = True, user_profile_enabled: bool = True):
+                 memory_enabled: bool = True, user_profile_enabled: bool = True,
+                 compact: bool = True):
         self.memory_entries: List[str] = []
         self.user_entries: List[str] = []
         self.memory_char_limit, self.user_char_limit = memory_char_limit, user_char_limit
         self.memory_enabled, self.user_profile_enabled = memory_enabled, user_profile_enabled
+        self._compact = compact
         self._system_prompt_snapshot: Dict[str, str] = {"memory": "", "user": ""}
         self._consolidation_failures = 0  # per turn; reset by reset_consolidation_failures()
 
@@ -130,7 +132,8 @@ class MemoryStore:
             # Deduplicate (order-preserving, first occurrence wins).
             entries = list(dict.fromkeys(self._read_file(path)))
             self._set_entries(target, entries)
-            self._system_prompt_snapshot[target] = self._render_block(target, [_sanitize(e, path.name) for e in entries])
+            self._system_prompt_snapshot[target] = self._render_block(
+                target, [_sanitize(e, path.name) for e in entries], compact=self._compact)
 
     @staticmethod
     @contextmanager
@@ -343,11 +346,26 @@ class MemoryStore:
                 "entry_count": len(self._entries_for(target)), **({"message": message} if message else {}),
                 "note": "Write saved. This update is complete — do not repeat it."}
 
-    def _render_block(self, target: str, entries: List[str]) -> str:
-        """System prompt block: header + usage indicator + entries ("" when empty)."""
+    def _render_block(self, target: str, entries: List[str], compact: bool = False) -> str:
+        """System prompt block: header + usage indicator + entries ("" when empty).
+
+        In compact mode, each entry is truncated to its first line (summary)
+        with '…' appended if there is more content. The full entries remain
+        retrievable via the memory tool.
+        """
         if not entries:
             return ""
-        content, sep = ENTRY_DELIMITER.join(entries), "═" * 46
+        if compact:
+            summaries = []
+            for entry in entries:
+                first_line = entry.split("\n", 1)[0]
+                if len(entry) > len(first_line):
+                    first_line += "…"
+                summaries.append(first_line)
+            content = ENTRY_DELIMITER.join(summaries)
+        else:
+            content = ENTRY_DELIMITER.join(entries)
+        sep = "═" * 46
         title = MEMORY_BLOCK_HEADERS["user" if target == "user" else "memory"]
         return f"{sep}\n{title} [{self._usage_pct(target, len(content))}]\n{sep}\n{content}"
 

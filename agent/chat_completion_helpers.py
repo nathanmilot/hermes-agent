@@ -1661,7 +1661,8 @@ def build_assistant_message(agent, assistant_message, finish_reason: str) -> dic
     reasoning_text = _assistant_reasoning_text(agent, assistant_message)
     msg = stamp_message_timestamp({"role": "assistant",
         "content": _assistant_content_for_storage(agent, assistant_message), "reasoning": reasoning_text,
-        "finish_reason": finish_reason})
+        "finish_reason": finish_reason,
+        "token_count": getattr(agent, "_last_api_total_tokens", None)})
 
     raw_reasoning_content = getattr(assistant_message, "reasoning_content", None)
     if raw_reasoning_content is None:

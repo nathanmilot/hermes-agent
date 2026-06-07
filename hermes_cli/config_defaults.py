@@ -253,6 +253,13 @@ DEFAULT_CONFIG = {
         "turn_liveness": {"timeout_s": 600.0, "poll_s": 15.0},
     },
 
+    "gepa": {
+        # Enable GEPA-based optimization of agent guidance text
+        # (system prompt conciseness, skill index format, etc.).
+        # When false, all automated GEPA optimization is skipped.
+        "enabled": True,
+    },
+
     "terminal": {
         "backend": "local",
         "modal_mode": "auto",

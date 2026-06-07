@@ -143,6 +143,9 @@ def record_response_usage(
 
     # Stash canonical usage for on_turn_complete(); keep the latest call's.
     agent._last_turn_usage = dict(usage_dict)
+    # Persist per-call total so build_assistant_message can stamp token_count on
+    # each assistant message dict (fixes NULL token_count in state.db messages).
+    agent._last_api_total_tokens = total_tokens
 
     # Persist only provider-confirmed context lengths, not probe tiers.
     if getattr(compressor, "_context_probed", False):

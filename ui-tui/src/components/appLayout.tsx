@@ -409,9 +409,9 @@ const ComposerPane = memo(function ComposerPane({
                 {sh ? (
                   <PromptPrefix color={ui.theme.color.shellDollar} promptText={promptText} width={promptWidth} />
                 ) : composer.inputBuf.length ? (
-                  <Text color={ui.theme.color.prompt}>{promptBlank}</Text>
+                  <Text color={ui.theme.color.accent}>{promptBlank}</Text>
                 ) : (
-                  <PromptPrefix bold color={ui.theme.color.prompt} promptText={promptText} width={promptWidth} />
+                  <PromptPrefix bold color={ui.theme.color.accent} promptText={promptText} width={promptWidth} />
                 )}
               </Box>
 
