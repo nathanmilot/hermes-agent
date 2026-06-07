@@ -845,6 +845,39 @@ export const slateTheme: DesktopTheme = {
   }
 }
 
+/** Tailwind grays with brand green/blue accents — retro terminal flair. Matches the CLI proxxied skin. */
+export const proxxiedTheme: DesktopTheme = {
+  name: 'proxxied',
+  label: 'Proxxied',
+  description: 'Tailwind grays with green/blue accents',
+  colors: {
+    background: '#111827',
+    foreground: '#e5e7eb',
+    card: '#1f2937',
+    cardForeground: '#e5e7eb',
+    muted: '#1a2332',
+    mutedForeground: '#9ca3af',
+    popover: '#1f2937',
+    popoverForeground: '#e5e7eb',
+    primary: '#13c269',
+    primaryForeground: '#111827',
+    secondary: '#1e3a5f',
+    secondaryForeground: '#d1d5db',
+    accent: '#136cc2',
+    accentForeground: '#ffffff',
+    border: '#374151',
+    input: '#374151',
+    ring: '#13c269',
+    midground: '#13c269',
+    destructive: '#ef4444',
+    destructiveForeground: '#ffffff',
+    sidebarBackground: '#0f172a',
+    sidebarBorder: '#1e2937',
+    userBubble: '#1e3a5f',
+    userBubbleBorder: '#374151'
+  }
+}
+
 export const BUILTIN_THEMES: Record<string, DesktopTheme> = {
   nous: nousTheme,
   github: githubTheme,
@@ -856,7 +889,8 @@ export const BUILTIN_THEMES: Record<string, DesktopTheme> = {
   ember: emberTheme,
   mono: monoTheme,
   slate: slateTheme,
-  cyberpunk: cyberpunkTheme
+  cyberpunk: cyberpunkTheme,
+  proxxied: proxxiedTheme
 }
 
 export const BUILTIN_THEME_LIST = Object.values(BUILTIN_THEMES)

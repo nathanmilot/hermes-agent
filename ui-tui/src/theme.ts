@@ -403,6 +403,213 @@ export const LIGHT_THEME: Theme = {
   bannerHeroSmall: ''
 }
 
+// ── Background-aware readability adaptation ─────────────────────────
+//
+// Mirrors the desktop app's theme contract (apps/desktop/src/themes): skins
+// contribute accent IDENTITY; readability against the actual background is
+// the theme engine's job, enforced in one place. Two guards, in the desktop's
+// vocabulary:
+//
+//   * `ensureContrast` — foreground-role colors are step-mixed toward the
+//     readable pole (black on light, white on dark) until they clear a
+//     minimum WCAG contrast ratio against the real (or assumed) background.
+//     Hue survives; washout doesn't.
+//   * Fill polarity — background-role colors (completion menu, status bar,
+//     selection) must match the terminal's polarity. Unlike the desktop, the
+//     TUI does not own its canvas — panels sit directly on the terminal's
+//     background — so a wrong-polarity fill (navy menu on a white terminal)
+//     falls back to the base palette even when the skin authored it.
+
+// Display shim — the "rendering gotcha" layer, calibrated against the look
+// the maintainers standardized on (pixel-sampled from the reference
+// screenshot): the beloved cross-polarity rendering is the AUTHORED palette
+// displayed RAW — slate's ~1.5:1 pastels on white read as deliberate airy
+// hierarchy, not a bug. So the floors are barely-visible rescues only:
+//   * DISPLAY 1.45 sits just above slate-pastel territory (#c9d1d9 = 1.54,
+//     passes raw, byte-identical) but just below true invisibility
+//     (default's cream #FFF8DC = 1.08, gets rescued).
+//   * SEMANTIC 2.2 for alert colors (ok/error/warn/status) — they carry
+//     meaning and must never vanish.
+// The lift itself is xterm.js's own multiplicative algorithm
+// (liftForContrast), so on hosts that run their own minimumContrastRatio the
+// two adjustments agree instead of fighting.
+// Foreground floors are polarity-aware. On a DARK background the authored
+// palette is already bright, so a modest floor only rescues the rare dark
+// tone. On a LIGHT background — which in practice means a TRANSPARENT Cursor/
+// terminal window compositing over a light editor, where xterm applies NO
+// contrast lift of its own (there is no solid bg to measure against) — the
+// beloved classic look is the authored palette rendered essentially RAW:
+// vivid #FFD700 gold (~1.36:1), not a WCAG-darkened mustard. So the light
+// floor is a near-invisible rescue only (catches cream #FFF8DC at 1.08 but
+// leaves the golds untouched). Pixel-sampled target: #F5C242 (L61 S90),
+// which the previous 1.45 floor crushed to #867000 (L26) — the reported mud.
+const DISPLAY_MIN_CONTRAST = 1.45
+const SEMANTIC_MIN_CONTRAST = 2.2
+const LIGHT_DISPLAY_MIN_CONTRAST = 1.18
+const LIGHT_SEMANTIC_MIN_CONTRAST = 1.6
+
+const DISPLAY_FOREGROUNDS: readonly (keyof ThemeColors)[] = [
+  'primary',
+  'accent',
+  'text',
+  'label',
+  'prompt',
+  'statusFg',
+  'border',
+  'muted',
+  'sessionLabel',
+  'sessionBorder',
+  'shellDollar'
+]
+
+const SEMANTIC_FOREGROUNDS: readonly (keyof ThemeColors)[] = [
+  'ok',
+  'error',
+  'warn',
+  'statusGood',
+  'statusWarn',
+  'statusBad',
+  'statusCritical'
+]
+
+const ADAPTIVE_BACKGROUNDS: readonly (keyof ThemeColors)[] = [
+  'completionBg',
+  'completionCurrentBg',
+  'completionMetaBg',
+  'completionMetaCurrentBg',
+  'statusBg',
+  'selectionBg'
+]
+
+// Fill polarity limits: on light terminals a fill must stay light, and vice
+// versa — there is no readable middle for a panel fill on the wrong pole.
+const LIGHT_BG_MIN_LUMINANCE = 0.4
+const DARK_BG_MAX_LUMINANCE = 0.35
+
+function adaptColorsToBackground(colors: ThemeColors, isLight: boolean, base: ThemeColors, bg: string): ThemeColors {
+  const out = { ...colors }
+  const displayFloor = isLight ? LIGHT_DISPLAY_MIN_CONTRAST : DISPLAY_MIN_CONTRAST
+  const semanticFloor = isLight ? LIGHT_SEMANTIC_MIN_CONTRAST : SEMANTIC_MIN_CONTRAST
+
+  for (const key of DISPLAY_FOREGROUNDS) {
+    out[key] = liftForContrast(out[key], bg, displayFloor)
+  }
+
+  for (const key of SEMANTIC_FOREGROUNDS) {
+    out[key] = liftForContrast(out[key], bg, semanticFloor)
+  }
+
+  for (const key of ADAPTIVE_BACKGROUNDS) {
+    const luminance = relativeLuminance(out[key])
+
+    if (luminance === null) {
+      continue
+    }
+
+    if (isLight ? luminance < LIGHT_BG_MIN_LUMINANCE : luminance > DARK_BG_MAX_LUMINANCE) {
+      out[key] = base[key]
+    }
+  }
+
+  return out
+}
+
+/** The background hex adaptation measures contrast against: the OSC-11
+ *  answer when known (cached in HERMES_TUI_BACKGROUND), else the mode's
+ *  assumed pole. */
+function referenceBackground(isLight: boolean, env: NodeJS.ProcessEnv = process.env): string {
+  const cached = (env.HERMES_TUI_BACKGROUND ?? '').trim()
+
+  if (cached && backgroundLuminance(cached) !== null) {
+    return cached.startsWith('#') ? cached : `#${cached}`
+  }
+
+  return isLight ? '#ffffff' : '#101014'
+}
+
+// ── Derived tone ladder (the desktop color-mix system) ──────────────
+//
+// A theme is a handful of SEEDS (text, primary, accent, border, status hues);
+// every secondary tone — muted text, labels, surfaces, selection chips — is a
+// color-mix derivative of those seeds against the real terminal background,
+// exactly like the desktop's `--theme-*` seeds → `--ui-*` color-mix ladder in
+// apps/desktop/src/styles.css. Skins therefore cannot ship an incoherent
+// "dim": if they don't author a tone, it is DERIVED from their own identity,
+// never inherited from another skin's palette.
+//
+// Mix knobs are the single source of truth for tone hierarchy. (The classic
+// prompt_toolkit CLI still reads the built-in skins' complete authored
+// palettes; those were generated with the same math.)
+
+export interface ThemeTones {
+  /** Secondary/dim text: receded accent (dark) / primary-ink blend (light). */
+  muted: string
+  /** Field labels: one step brighter than muted, same family. */
+  label: string
+  /** Status-bar default text: the gray of slightly-receded text. */
+  statusFg: string
+  /** Raised panel fill: background nudged toward the (softened) accent. */
+  surface: string
+  /** Active list-row chip: surface tinted with accent. */
+  activeRow: string
+  /** Text-selection highlight: bg tinted with the theme's blue (light) or accent (dark). */
+  selection: string
+  /** Border fallback: accent receded toward the background. */
+  border: string
+}
+
+/**
+ * The fitted tone ladder. Knobs are REVERSE-ENGINEERED from the original
+ * hand-tuned palettes (grid-search over mix/desaturate formula families
+ * against the pre-refactor literals + every authored skin palette; see the
+ * "reproduces the original hand-tuned tones" test for the contract):
+ *
+ *   dark muted  #CC9B1F ≈ desaturate(mix(accent, bg, .19), .16)  (err 3)
+ *   dark label  #DAA520 ≈ desaturate(mix(accent, bg, .13), .16)  (err 3)
+ *   dark status #C0C0C0 = grayOf(mix(text, bg, .24))             (err 0)
+ *   light muted #946C08 ≈ desaturate(accent, .05)                (err 2)
+ *   light label #8E6B13 ≈ desaturate(mix(accent, text, .03), .15) (err 2)
+ *   light status #6F6F6F = grayOf(mix(text, bg, .30))            (err 1)
+ *   light surface #F5F5F5 ≈ bg + softened accent                 (err 5)
+ *   light chip  #E0D1BF = mix(surface, accent, .25)              (err 8)
+ *   light selection #D4E4F7 ≈ mix(bg, shellDollar, .20)          (err 7)
+ *
+ * The light targets are the LIFT CANON: liftForContrast(dark literal,
+ * white, 4.5) — what xterm's minimumContrastRatio showed on light hosts
+ * for years — not hand-picked browns (those read as desaturated mud).
+ *
+ * The classic dark navy fills (#1a1a2e/#333355/#3a3a55) are IRREDUCIBLE from
+ * gold seeds — the search bottoms out at gray, err 10–17 — so they remain
+ * explicit identity seeds on DARK_SEEDS rather than pretending to be math.
+ */
+export function deriveTones(seeds: {
+  accent: string
+  bg: string
+  primary: string
+  shellDollar?: string
+  text: string
+}): ThemeTones {
+  const { accent, bg, text } = seeds
+  const isLight = (relativeLuminance(bg) ?? 0) > 0.5
+  // Fill tint keeps most of the accent's chroma — a heavier desaturate here
+  // read as washed-out ("a little too desat") next to authored fills.
+  const surface = mix(bg, desaturate(accent, 0.15), isLight ? 0.045 : 0.09)
+
+  return {
+    // Light knobs are fitted to the lift canon (xterm minimumContrastRatio
+    // 4.5 of the classic dark golds against white — see LIGHT_SEEDS), not
+    // to ink blends: muted #946C08 ≈ desat(accent .05), label #8E6B13 ≈
+    // desat(mix(accent, text, .03), .15), statusFg #6F6F6F ≈ gray 30% lift.
+    muted: isLight ? desaturate(accent, 0.05) : desaturate(mix(accent, bg, 0.19), 0.16),
+    label: isLight ? desaturate(mix(accent, text, 0.03), 0.15) : desaturate(mix(accent, bg, 0.13), 0.16),
+    statusFg: grayOf(mix(text, bg, isLight ? 0.3 : 0.24)),
+    surface,
+    activeRow: mix(surface, accent, 0.25),
+    selection: isLight && seeds.shellDollar ? mix(bg, seeds.shellDollar, 0.2) : mix(surface, accent, 0.28),
+    border: mix(accent, bg, 0.25)
+  }
+}
+
 const TRUE_RE = /^(?:1|true|yes|on)$/
 const FALSE_RE = /^(?:0|false|no|off)$/
 
@@ -650,6 +857,7 @@ export function fromSkin(
     bannerHeroSmall
   }, process.env, DEFAULT_LIGHT_MODE)
 }
+}
 
 export function defaultThemeForCurrentBackground(env: NodeJS.ProcessEnv = process.env): Theme {
   const isLight = detectLightMode(env)
@@ -661,4 +869,3 @@ export function skinIsLight(colors: Record<string, string>, env: NodeJS.ProcessE
   if (!bg) return detectLightMode(env)
   const lum = backgroundLuminance(bg)
   return lum !== null ? lum >= LUMA_LIGHT_THRESHOLD : detectLightMode(env)
-}

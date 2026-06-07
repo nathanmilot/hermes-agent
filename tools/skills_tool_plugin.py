@@ -14,6 +14,7 @@ logger = logging.getLogger("tools.skills_tool")
 
 MAX_NAME_LENGTH = 64  # Anthropic-recommended progressive-disclosure limits
 MAX_DESCRIPTION_LENGTH = 1024
+SKILL_CONTENT_MAX_CHARS = 12000  # truncate verbose skills to save output tokens
 _INJECTION_PATTERNS: list = [  # shared by local-skill and plugin-skill paths
     "ignore previous instructions", "ignore all previous", "you are now",
     "disregard your", "forget your instructions", "new instructions:",
@@ -153,8 +154,15 @@ def _serve_plugin_skill(
     rendered_content = content if not preprocess else _preprocess_skill(
         content, skill_md.parent, session_id, "Could not preprocess plugin skill %s:%s",
         namespace, bare)
+    full_content = f"{banner}{rendered_content}" if banner else rendered_content
+    if len(full_content) > SKILL_CONTENT_MAX_CHARS:
+        full_content = (
+            full_content[:SKILL_CONTENT_MAX_CHARS]
+            + f"\n\n[...truncated {len(full_content) - SKILL_CONTENT_MAX_CHARS:,} chars. "
+            + "Load linked files with skill_view(name, file_path='references/...') for full content.]"
+        )
     return _json({
-        "success": True, "name": qualified_name, "content": banner + rendered_content,
+        "success": True, "name": qualified_name, "content": full_content,
         "description": _truncate_description(str(parsed_frontmatter.get("description", ""))),
         "linked_files": _plugin_skill_linked_files(skill_md.parent),
         "readiness_status": SkillReadinessStatus.AVAILABLE.value})

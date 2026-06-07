@@ -589,7 +589,6 @@ LEGACY_AUTHOR_MAP = {
     "donovan-yohan@users.noreply.github.com": "donovan-yohan",
     "121752779+jacevys@users.noreply.github.com": "jacevys",
     "me@promplate.dev": "CNSeniorious000",
-    "yichengqiao21@gmail.com": "YarrowQiao",
     "erhanyasarx@gmail.com": "erhnysr",
     "draihan@student.ubc.ca": "0xdany",  # PR #26124 salvage (chat argv off event loop)
     "30366221+WorldWriter@users.noreply.github.com": "WorldWriter",

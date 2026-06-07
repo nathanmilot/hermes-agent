@@ -151,6 +151,9 @@ def record_response_usage(
     # The parent's CURRENT prompt size for headroom math (delegate summary budgets): the
     # aggregator's own prompt, never the MoA-folded total (advisor prompts are not in this context).
     agent._last_prompt_size_tokens = int(aggregator_usage.prompt_tokens or 0)
+    # Persist per-call total so build_assistant_message can stamp token_count on
+    # each assistant message dict (fixes NULL token_count in state.db messages).
+    agent._last_api_total_tokens = total_tokens
 
     # Persist only provider-confirmed context lengths, not probe tiers.
     if getattr(compressor, "_context_probed", False):
