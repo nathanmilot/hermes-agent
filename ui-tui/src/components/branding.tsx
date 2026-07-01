@@ -1,4 +1,4 @@
-import { Box, Text, useStdout } from '@hermes/ink'
+import { Ansi, Box, Text, useStdout } from '@hermes/ink'
 import { useEffect, useState } from 'react'
 import unicodeSpinners from 'unicode-animations'
 
@@ -39,182 +39,99 @@ export function ArtLines({ lines }: { lines: [string, string][] }) {
   // background" spaces composite to black bars instead of the intended
   // see-through — the reported ugly banner. Glyphs paint fine on their own.
   return (
-    <Box flexDirection="column" height={lines.length} width={artWidth(lines)}>
-      {lines.map(([c, text], i) => (
-        <Text color={c} key={i} wrap="truncate-end">
-          {text}
-        </Text>
-      ))}
-    </Box>
+    <>
+      {lines.map(([c, text], i) =>
+        text.includes('\x1b[') ? (
+          <Ansi key={i}>{text}</Ansi>
+        ) : (
+          <Text color={c} key={i}>
+            {text}
+          </Text>
+        )
+      )}
+    </>
   )
 }
 
-// Responsive Banner: full art → compact rule → text → hidden.
-//
-// Terminals can't scale glyphs, so "responsive" means picking a layout that
-// fits the available columns. Thresholds are picked so each tier reads
-// comfortably without forcing wrap or truncation drift on box-drawing edges.
-const TAG_FULL = 'Nous Research · Messenger of the Digital Gods'
-const TAG_MID = 'Messenger of the Digital Gods'
-const TAG_TINY = 'Nous Research'
-const HIDE_BELOW = 34
-const COMPACT_FROM = 58
-
-const clip = (s: string, w: number) => (w <= 0 ? '' : s.length > w ? `${s.slice(0, Math.max(0, w - 1))}…` : s)
-
-const centerIn = (s: string, w: number) => {
-  const f = clip(s, w)
-  const slack = Math.max(0, w - f.length)
-  const left = slack >> 1
-
-  return `${' '.repeat(left)}${f}${' '.repeat(slack - left)}`
-}
-
-const ruleIn = (label: string, w: number) => {
-  const f = clip(label, Math.max(1, w - 4))
-  const slack = Math.max(0, w - f.length - 2)
-  const left = slack >> 1
-
-  return `${'─'.repeat(left)} ${f} ${'─'.repeat(slack - left)}`
-}
-
-function CompactBanner({ cols, t }: { cols: number; t: Theme }) {
-  // -4 keeps a margin so exact-edge rows don't trip terminal pending-wrap.
-  const w = Math.max(28, cols - 4)
-
-  // No `opaque` (see ArtLines): the dashed rules are glyphs and the tagline's
-  // centering spaces carry the text's own fg style, so every cell paints with
-  // a real see-through background. The opaque fill was writing default-bg
-  // spaces that a transparent terminal renders as black bars.
-  // NOT bold: on Cursor's transparent-background terminal, a full-width run
-  // of BOLD box-drawing dashes renders with an opaque black cell background
-  // (the plain-dash rule right below renders clean — pixel-diffed live; the
-  // only stylistic delta was bold). Bold on short label runs is fine; bold on
-  // full-width box-drawing rows is what triggers the slab.
-  return (
-    <Box flexDirection="column" height={3} marginBottom={1} width={w}>
-      <Text color={t.color.primary}>{ruleIn(t.brand.name, w)}</Text>
-      <Text color={t.color.muted}>{centerIn(TAG_FULL, w)}</Text>
-      <Text color={t.color.primary}>{'─'.repeat(w)}</Text>
-    </Box>
-  )
-}
-
-export function Banner({ maxWidth, t }: { maxWidth?: number; t: Theme }) {
-  const term = useStdout().stdout?.columns ?? 80
-  const cols = Math.max(1, Math.min(term, maxWidth ?? term))
-
-  if (cols < HIDE_BELOW) {
-    return null
-  }
-
+export function Banner({ t }: { t: Theme }) {
+  const cols = useStdout().stdout?.columns ?? 80
   const logoLines = logo(t.color, t.bannerLogo || undefined)
-  const logoW = t.bannerLogo ? artWidth(logoLines) : LOGO_WIDTH
-
-  // Each tier renders its rows through a single-column WidgetGrid sized to
-  // the available columns — same visual output as the old plain flex column
-  // (cells clip where truncate-end used to), but the banner is now a
-  // layout-engine surface.
-  if (cols >= logoW + 2) {
-    return (
-      <Box flexDirection="column" marginBottom={1}>
-        <WidgetGrid
-          cols={cols}
-          columns={1}
-          gap={0}
-          paddingX={0}
-          paddingY={0}
-          rowGap={0}
-          widgets={[
-            { children: <ArtLines lines={logoLines} />, id: 'banner-art' },
-            {
-              children: (
-                <Text color={t.color.muted} wrap="truncate-end">
-                  {t.brand.icon} {TAG_FULL}
-                </Text>
-              ),
-              id: 'banner-tagline'
-            }
-          ]}
-        />
-      </Box>
-    )
-  }
-
-  if (cols >= COMPACT_FROM) {
-    return (
-      <WidgetGrid
-        cols={cols}
-        columns={1}
-        gap={0}
-        paddingX={0}
-        paddingY={0}
-        rowGap={0}
-        widgets={[{ children: <CompactBanner cols={cols} t={t} />, id: 'banner-compact' }]}
-      />
-    )
-  }
-
-  const name = cols >= 52 ? t.brand.name : (t.brand.name.split(' ')[0] ?? t.brand.name)
-  const tag = cols >= 64 ? TAG_FULL : cols >= 46 ? TAG_MID : TAG_TINY
 
   return (
     <Box flexDirection="column" marginBottom={1}>
-      <WidgetGrid
-        cols={cols}
-        columns={1}
-        gap={0}
-        paddingX={0}
-        paddingY={0}
-        rowGap={0}
-        widgets={[
-          {
-            children: (
-              <Text bold color={t.color.primary} wrap="truncate-end">
-                {t.brand.icon} {name}
-              </Text>
-            ),
-            id: 'banner-name'
-          },
-          {
-            children: (
-              <Text color={t.color.muted} wrap="truncate-end">
-                {t.brand.icon} {tag}
-              </Text>
-            ),
-            id: 'banner-tag'
-          }
-        ]}
-      />
+      {cols >= (t.bannerLogo ? artWidth(logoLines) : LOGO_WIDTH) ? (
+        <ArtLines lines={logoLines} />
+      ) : (
+        <Text bold color={t.color.primary}>
+          {t.brand.icon} NOUS HERMES
+        </Text>
+      )}
+
+      <Text color={t.color.muted}>{t.brand.icon} Nous Research · Messenger of the Digital Gods</Text>
     </Box>
   )
 }
 
-// ── Skeleton ─────────────────────────────────────────────────────────
-//
-// Lazy sections render shimmer rows shaped like the real content (label
-// block + value run) instead of a blank gap that pops when data lands.
-// Row widths mirror the typical toolsets listing.
-const SKELETON_ROWS: readonly (readonly [number, number])[] = [
-  [7, 30],
-  [7, 9],
-  [14, 12],
-  [12, 12],
-  [7, 7],
-  [10, 13]
-]
+// ── Collapsible helpers ──────────────────────────────────────────────
+
+function CollapseToggle({
+  count,
+  open,
+  suffix,
+  t,
+  title,
+  onToggle
+}: {
+  count?: number
+  open: boolean
+  suffix?: string
+  t: Theme
+  title: string
+  onToggle: () => void
+}) {
+  return (
+    <Box onClick={onToggle}>
+      <Text color={t.color.accent}>{open ? '▾ ' : '▸ '}</Text>
+      <Text bold color={t.color.accent}>
+        {title}
+      </Text>
+      {typeof count === 'number' ? (
+        <Text color={t.color.muted}> ({count})</Text>
+      ) : null}
+      {suffix ? (
+        <Text color={t.color.muted}> {suffix}</Text>
+      ) : null}
+    </Box>
+  )
+}
 
 // ── SessionPanel ─────────────────────────────────────────────────────
 
 const SKILLS_MAX = 8
 const TOOLSETS_MAX = 8
 
-export function SessionPanel({ info, maxWidth, sid, t }: SessionPanelProps) {
-  const term = useStdout().stdout?.columns ?? 100
-  const cols = Math.max(20, Math.min(term, maxWidth ?? term))
+export function SessionPanel({ info, sid, t }: SessionPanelProps) {
+  const cols = useStdout().stdout?.columns ?? 100
   const heroLines = caduceus(t.color, t.bannerHero || undefined)
-  const leftW = Math.min((artWidth(heroLines) || CADUCEUS_WIDTH) + 4, Math.floor(cols * 0.4))
-  const wide = cols >= 90 && leftW + 40 < cols
+  const narrowHeroLines = caduceus(t.color, t.bannerHeroSmall || undefined)
+  const artW = artWidth(heroLines) || CADUCEUS_WIDTH
+  const leftW = Math.min(artW + 4, Math.floor(cols * 0.4))
+  // Center ANSI art within artW
+  const ANSI_RE = /\x1b\[[0-9;?]*[a-zA-Z]/g
+  const centeredLines = heroLines.map(([c, text]) => {
+    if (!text.includes('\x1b[')) return [c, text] as [string, string]
+    const visible = text.replace(ANSI_RE, '')
+    const pad = Math.floor((artW - visible.length) / 2)
+    return [c, ' '.repeat(Math.max(0, pad)) + text] as [string, string]
+  })
+  const narrowArtW = artWidth(narrowHeroLines) || CADUCEUS_WIDTH
+  const narrowCenteredLines = narrowHeroLines.map(([c, text]) => {
+    if (!text.includes('\x1b[')) return [c, text] as [string, string]
+    const visible = text.replace(ANSI_RE, '')
+    const pad = Math.floor((narrowArtW - visible.length) / 2)
+    return [c, ' '.repeat(Math.max(0, pad)) + text] as [string, string]
+  })
+  const wide = cols >= 70 && leftW + 40 < cols
   const w = Math.max(20, wide ? cols - leftW - 14 : cols - 12)
   const lineBudget = Math.max(12, w - 2)
   const strip = (s: string) => (s.endsWith('_tools') ? s.slice(0, -6) : s)
@@ -270,7 +187,9 @@ export function SessionPanel({ info, maxWidth, sid, t }: SessionPanelProps) {
             <Text color={listFade}>{truncLine(strip(k) + ': ', vs)}</Text>
           </Text>
         ))}
-        {overflow > 0 && <Text color={t.color.muted}>(and {overflow} more categories…)</Text>}
+        {overflow > 0 && (
+          <Text color={t.color.muted}>(and {overflow} more categories…)</Text>
+        )}
       </>
     )
   }
@@ -301,7 +220,9 @@ export function SessionPanel({ info, maxWidth, sid, t }: SessionPanelProps) {
             <Text color={listFade}>{truncLine(strip(k) + ': ', vs)}</Text>
           </Text>
         ))}
-        {overflow > 0 && <Text color={t.color.muted}>(and {overflow} more toolsets…)</Text>}
+        {overflow > 0 && (
+          <Text color={t.color.muted}>(and {overflow} more toolsets…)</Text>
+        )}
       </>
     )
   }
@@ -340,18 +261,19 @@ export function SessionPanel({ info, maxWidth, sid, t }: SessionPanelProps) {
       return <Text color={t.color.muted}>No system prompt loaded.</Text>
     }
 
-    return <Text color={t.color.muted}>{info.system_prompt}</Text>
+    return (
+      <Text color={t.color.muted}>
+        {info.system_prompt}
+      </Text>
+    )
   }
 
-  // The wide layout is a real two-column grid: a fixed-width hero track and a
-  // flexible info track (grid-template-columns: <leftW> 1fr, gap 2) — the
-  // terminal equivalent of the desktop pane shell's fixed-vs-flex tracks.
-  // Narrow drops to a single flexible track. Track math reproduces the old
-  // hand-rolled widths exactly: usable = (leftW + 2 + w) - gap = leftW + w.
-  const heroColumn = wide ? (
-    <Box flexDirection="column" width="100%">
-      <ArtLines lines={heroLines} />
-      <Text />
+  return (
+    <Box borderColor={t.color.border} borderStyle="round" marginBottom={1} paddingX={2} paddingY={1}>
+      {wide && (
+        <Box flexDirection="column" marginRight={2} width={leftW}>
+          <ArtLines lines={centeredLines} />
+          <Text />
 
       <Text color={t.color.accent}>
         {info.model.split('/').pop()}
@@ -401,11 +323,105 @@ export function SessionPanel({ info, maxWidth, sid, t }: SessionPanelProps) {
         </Box>
       )}
 
-      {/* ── Tools (expanded by default) ── */}
-      <Box flexDirection="column" marginTop={1}>
-        <Accordion onToggle={() => setToolsOpen(v => !v)} open={toolsOpen} t={t} title="Available Tools">
-          {toolsBody()}
-        </Accordion>
+      <Box flexDirection="column" width={w}>
+        <Box justifyContent="center" marginBottom={1}>
+          <Text bold color={t.color.primary}>
+            {t.brand.name}
+            {info.version ? ` v${info.version}` : ''}
+            {info.release_date ? ` (${info.release_date})` : ''}
+          </Text>
+        </Box>
+        {!wide && t.bannerHeroSmall && (
+          <Box flexDirection="column" marginBottom={1}>
+            {narrowCenteredLines.map(([c, text], i) =>
+              text.includes('\x1b[') ? (
+                <Box key={i}><Ansi>{text}</Ansi></Box>
+              ) : (
+                <Text color={c} key={i}>{text}</Text>
+              )
+            )}
+          </Box>
+        )}
+
+        {/* ── Tools (expanded by default) ── */}
+        <Box flexDirection="column" marginTop={1}>
+          <CollapseToggle
+            onToggle={() => setToolsOpen(v => !v)}
+            open={toolsOpen}
+            t={t}
+            title="Available Tools"
+          />
+          {toolsOpen && toolsBody()}
+        </Box>
+
+        {/* ── Skills (collapsed by default) ── */}
+        <Box flexDirection="column" marginTop={1}>
+          <CollapseToggle
+            count={skillsTotal}
+            onToggle={() => setSkillsOpen(v => !v)}
+            open={skillsOpen}
+            suffix={skillsCatCount > 0 ? `in ${skillsCatCount} categor${skillsCatCount === 1 ? 'y' : 'ies'}` : undefined}
+            t={t}
+            title="Available Skills"
+          />
+          {skillsOpen && skillsBody()}
+        </Box>
+
+        {/* ── System Prompt (collapsed by default) ── */}
+        {sysPromptLen > 0 && (
+          <Box flexDirection="column" marginTop={1}>
+            <CollapseToggle
+              onToggle={() => setSystemOpen(v => !v)}
+              open={systemOpen}
+              suffix={`— ${sysPromptLen.toLocaleString()} chars`}
+              t={t}
+              title="System Prompt"
+            />
+            {systemOpen && systemBody()}
+          </Box>
+        )}
+
+        {/* ── MCP Servers (collapsed by default) ── */}
+        {mcpServers.length > 0 && (
+          <Box flexDirection="column" marginTop={1}>
+            <CollapseToggle
+              count={mcpConnected}
+              onToggle={() => setMcpOpen(v => !v)}
+              open={mcpOpen}
+              suffix="connected"
+              t={t}
+              title="MCP Servers"
+            />
+            {mcpOpen && mcpBody()}
+          </Box>
+        )}
+
+        <Text />
+
+        <Text color={t.color.text}>
+          {toolsTotal} tools{' · '}
+          {skillsTotal} skills
+          {mcpConnected ? ` · ${mcpConnected} MCP` : ''}
+          {' · '}
+          <Text color={t.color.muted}>/help for commands</Text>
+        </Text>
+
+        {typeof info.update_behind === 'number' && info.update_behind > 0 && (
+          <Text bold color={t.color.warn}>
+            ! {info.update_behind} {info.update_behind === 1 ? 'commit' : 'commits'} behind
+            <Text bold={false} color={t.color.warn} dimColor>
+              {' '}
+              - run{' '}
+            </Text>
+            <Text bold color={t.color.warn}>
+              {info.update_command || 'hermes update'}
+            </Text>
+            <Text bold={false} color={t.color.warn} dimColor>
+              {' '}
+              to update
+            </Text>
+          </Text>
+        )}
       </Box>
 
       {/* ── Skills (collapsed by default) ── */}
@@ -556,7 +572,6 @@ interface PanelProps {
 
 interface SessionPanelProps {
   info: SessionInfo
-  maxWidth?: number
   sid?: string | null
   t: Theme
 }
