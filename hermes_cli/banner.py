@@ -261,9 +261,54 @@ def _check_via_rev(local_rev: str) -> Optional[int]:
 
 
 def _check_via_local_git(repo_dir: Path) -> Optional[int]:
-    """Count commits behind origin/main in a local checkout."""
+    """Count commits behind origin/main in a local checkout.
+
+    For official SSH remotes we still try ``git fetch`` with BatchMode
+    (no password prompts) to get a real count; only fall back to the
+    ls-remote tip-comparison when the fetch fails.
+    """
     origin_url = _git_stdout(["remote", "get-url", "origin"], cwd=repo_dir)
-    if _is_official_ssh_remote(origin_url):
+    is_official_ssh = _is_official_ssh_remote(origin_url)
+
+    fetch_ok = True
+    if is_official_ssh:
+        # Try fetch with non-interactive SSH — works if keys are present,
+        # fails silently (no prompt) if not.
+        try:
+            env = os.environ.copy()
+            env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+            result = subprocess.run(
+                ["git", "fetch", "origin", "--quiet"],
+                capture_output=True, timeout=10,
+                cwd=str(repo_dir), env=env,
+            )
+            fetch_ok = result.returncode == 0
+        except Exception:
+            fetch_ok = False
+    else:
+        try:
+            subprocess.run(
+                ["git", "fetch", "origin", "--quiet"],
+                capture_output=True, timeout=10,
+                cwd=str(repo_dir),
+            )
+        except Exception:
+            pass  # Offline or timeout — use stale refs, that's fine
+
+    if fetch_ok:
+        try:
+            result = subprocess.run(
+                ["git", "rev-list", "--count", "HEAD..origin/main"],
+                capture_output=True, text=True, timeout=5,
+                cwd=str(repo_dir),
+            )
+            if result.returncode == 0:
+                return int(result.stdout.strip())
+        except Exception:
+            pass
+
+    # Official SSH with failed fetch — fall back to ls-remote tip comparison.
+    if is_official_ssh and not fetch_ok:
         head_rev = _git_stdout(["rev-parse", "HEAD"], cwd=repo_dir)
         if not head_rev:
             return None
