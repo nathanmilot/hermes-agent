@@ -123,6 +123,7 @@ export function Banner({ maxWidth, t }: { maxWidth?: number; t: Theme }) {
   )
 }
 
+
 // ── Collapsible helpers ──────────────────────────────────────────────
 
 function CollapseToggle({
@@ -161,9 +162,8 @@ function CollapseToggle({
 const SKILLS_MAX = 8
 const TOOLSETS_MAX = 8
 
-export function SessionPanel({ info, maxWidth, sid, t }: SessionPanelProps) {
-  const term = useStdout().stdout?.columns ?? 100
-  const cols = Math.max(20, Math.min(term, maxWidth ?? term))
+export function SessionPanel({ info, sid, t }: SessionPanelProps) {
+  const cols = useStdout().stdout?.columns ?? 100
   const heroLines = caduceus(t.color, t.bannerHero || undefined)
   const narrowHeroLines = caduceus(t.color, t.bannerHeroSmall || undefined)
   const artW = artWidth(heroLines) || CADUCEUS_WIDTH
@@ -506,7 +506,6 @@ interface PanelProps {
 
 interface SessionPanelProps {
   info: SessionInfo
-  maxWidth?: number
   sid?: string | null
   t: Theme
 }
