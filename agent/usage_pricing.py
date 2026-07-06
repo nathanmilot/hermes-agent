@@ -266,6 +266,28 @@ for _provider, _alias, _canonical in (
 del _provider, _alias, _canonical
 
 
+# ── OpenCode Go / Zen — discounted rates via opencode.ai ──────
+# Rates derived from actual billing data.  The Go/zen platform
+# bundles tokens at far below official DeepSeek/Vendor API rates.
+# Source: opencode.ai pricing dashboard (verified 2026-07-06)
+_OFFICIAL_DOCS_PRICING[("opencode-go", "deepseek-v4-pro")] = PricingEntry(
+    input_cost_per_million=Decimal("0.015"),
+    output_cost_per_million=Decimal("4.60"),
+    cache_read_cost_per_million=Decimal("0.0015"),
+    source="user_override",
+    source_url="https://opencode.ai/pricing",
+    pricing_version="opencode-pricing-2026-07",
+)
+_OFFICIAL_DOCS_PRICING[("opencode-go", "deepseek-v4-flash")] = PricingEntry(
+    input_cost_per_million=Decimal("0.003"),
+    output_cost_per_million=Decimal("0.36"),
+    cache_read_cost_per_million=Decimal("0.0003"),
+    source="user_override",
+    source_url="https://opencode.ai/pricing",
+    pricing_version="opencode-pricing-2026-07",
+)
+
+
 def _to_decimal(value: Any) -> Optional[Decimal]:
     try:
         return None if value is None else Decimal(str(value))
