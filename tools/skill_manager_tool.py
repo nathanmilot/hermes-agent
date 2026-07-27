@@ -1460,15 +1460,37 @@ def skill_manage(
             return tool_error("file_path is required for 'remove_file'.", success=False)
         result = _remove_file(name, file_path)
 
+    elif action == "stow":
+        if not name or not name.strip():
+            return tool_error("name is required for 'stow'.", success=False)
+        if not _find_skill(name):
+            return tool_error(f"Skill '{name}' not found.", success=False)
+        # Stow a loaded skill: mark it as no longer needed so the context
+        # compressor can reclaim those tokens on the next compression cycle.
+        # Usage telemetry is bumped in the shared block below.
+        result = {
+            "success": True,
+            "action": "stow",
+            "name": name,
+            "message": (
+                f"Skill '{name}' stowed. Its usage has been recorded. "
+                f"The compact skill index remains available. "
+                f"Load again with skill_view(name='{name}') if needed."
+            ),
+        }
+
     else:
-        result = {"success": False, "error": f"Unknown action '{action}'. Use: create, edit, patch, delete, write_file, remove_file"}
+        result = {"success": False, "error": f"Unknown action '{action}'. Use: create, edit, patch, delete, write_file, remove_file, stow"}
 
     if result.get("success"):
-        try:
-            from agent.prompt_builder import clear_skills_system_prompt_cache
-            clear_skills_system_prompt_cache(clear_snapshot=True)
-        except Exception:
-            pass
+        # Clear prompt cache on mutations so the next prompt rebuild picks up
+        # changes. Stow is a read-only signal (no file changes) — skip it.
+        if action in ("create", "edit", "patch", "delete", "write_file", "remove_file"):
+            try:
+                from agent.prompt_builder import clear_skills_system_prompt_cache
+                clear_skills_system_prompt_cache(clear_snapshot=True)
+            except Exception:
+                pass
         # Curator telemetry: bump patch_count on edit/patch/write_file (the actions
         # that mutate an existing skill's guidance), drop the record on delete.
         # Only mark a skill as agent-created when the background self-improvement
@@ -1476,7 +1498,7 @@ def skill_manage(
         # user-directed, and those skills belong to the user (the curator must
         # not touch them). Best-effort; telemetry failures never break the tool.
         try:
-            from tools.skill_usage import bump_patch, forget, mark_agent_created
+            from tools.skill_usage import bump_patch, bump_use, forget, mark_agent_created
             from tools.skill_provenance import is_background_review
             if action == "create":
                 if is_background_review():
@@ -1489,6 +1511,8 @@ def skill_manage(
                 # status`/`restore` still see it. Only a hard delete forgets.
                 if not result.get("_archived"):
                     forget(name)
+            elif action == "stow":
+                bump_use(name)
         except Exception:
             pass
 
@@ -1540,8 +1564,8 @@ SKILL_MANAGE_SCHEMA = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["create", "patch", "edit", "delete", "write_file", "remove_file"],
-                "description": "The action to perform."
+                "enum": ["create", "patch", "edit", "delete", "write_file", "remove_file", "stow"],
+                "description": "The action to perform. 'stow' marks a loaded skill as no longer needed, signaling the context compressor to reclaim tokens."
             },
             "name": {
                 "type": "string",

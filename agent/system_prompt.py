@@ -46,6 +46,8 @@ from agent.prompt_builder import (
     TOOL_USE_ENFORCEMENT_GUIDANCE,
     TOOL_USE_ENFORCEMENT_MODELS,
     drain_truncation_warnings,
+    COST_AWARENESS_GUIDANCE,
+    parse_project_skill_config,
 )
 from agent.runtime_cwd import resolve_context_cwd
 from hermes_constants import get_hermes_home
@@ -240,6 +242,8 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         tool_guidance.append(KANBAN_GUIDANCE)
     if tool_guidance:
         stable_parts.append(" ".join(tool_guidance))
+    # Cost awareness — injected for all sessions since output tokens dominate cost
+    stable_parts.append(COST_AWARENESS_GUIDANCE)
 
     # Steering only lands inside tool results, so it's only reachable when the
     # agent has tools. Static text → byte-stable prompt (no cache hit).
@@ -302,23 +306,20 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
             )
             if toolset
         }
-        # Focus mode (opt-in) demotes non-coding skill categories to
-        # names-only in the index (never hidden — skill_view/skills_list
-        # reach everything, and every name stays visible for recall). The
-        # default coding posture leaves the index untouched.
-        _compact_cats = frozenset()
-        try:
-            from agent.coding_context import coding_compact_skill_categories
-
-            _compact_cats = coding_compact_skill_categories(
-                platform=agent.platform, cwd=resolve_context_cwd()
-            )
-        except Exception:
-            _compact_cats = frozenset()
+        # Parse project-scoped skill config from context files / config.yaml.
+        # Use TERMINAL_CWD for gateway-mode sessions so we look at the user's
+        # project directory, not the hermes-agent install directory.
+        project_cfg = parse_project_skill_config(
+            cwd=os.getenv("TERMINAL_CWD") or None
+        )
         skills_prompt = _r.build_skills_system_prompt(
             available_tools=agent.valid_tool_names,
             available_toolsets=avail_toolsets,
-            compact_categories=_compact_cats or None,
+            skill_include=project_cfg.get("include"),
+            skill_exclude=project_cfg.get("exclude"),
+            categories_include=project_cfg.get("categories_include"),
+            categories_exclude=project_cfg.get("categories_exclude"),
+            index_format=project_cfg.get("index_format", "keywords"),
         )
     else:
         skills_prompt = ""
@@ -345,36 +346,6 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     _env_hints = _r.build_environment_hints()
     if _env_hints:
         stable_parts.append(_env_hints)
-
-    # Coding posture (base Hermes, any interactive coding surface in a code
-    # workspace — see agent/coding_context.py). Keep the operating brief in
-    # the cross-session-stable prefix, while placing the live git/workspace
-    # snapshot behind its own cache boundary. The post-snapshot blocks must
-    # stay in their historical position after the workspace snapshot.
-    coding_workspace_parts: List[str] = []
-    coding_trailing_parts: List[str] = []
-    if agent.valid_tool_names:
-        try:
-            from agent.coding_context import coding_system_prompt_parts
-
-            coding_prefix_parts, coding_workspace_parts, coding_trailing_parts = coding_system_prompt_parts(
-                platform=agent.platform,
-                cwd=resolve_context_cwd(),
-                model=agent.model,
-            )
-            stable_parts.extend(coding_prefix_parts)
-        except Exception:
-            # Coding-context probing must never block prompt build.
-            pass
-
-    # Guidance assembled after the coding posture historically followed the
-    # workspace snapshot. With no snapshot, the coding tail instead remains
-    # directly after the coding prefix in the cacheable prefix.
-    if coding_workspace_parts:
-        post_workspace_parts: List[str] = []
-    else:
-        stable_parts.extend(coding_trailing_parts)
-        post_workspace_parts = stable_parts
 
     # Local Python toolchain probe — names python/pip/uv/PEP-668 state when
     # something is non-default so the model can pick the right install

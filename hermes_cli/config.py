@@ -1150,6 +1150,13 @@ DEFAULT_CONFIG = {
         # Edit directly in config.yaml (no CLI support due to dots in keys).
         "reasoning_overrides": {},
     },
+    
+    "gepa": {
+        # Enable GEPA-based optimization of agent guidance text 
+        # (system prompt conciseness, skill index format, etc.).
+        # When false, all automated GEPA optimization is skipped.
+        "enabled": True,
+    },
 
     "terminal": {
         "backend": "local",
