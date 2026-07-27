@@ -5,7 +5,9 @@ import type { SessionInfo, SlashCategory, SubagentStatus, Usage } from './types.
 
 /** The cross-surface skin contract (canonical shape in `@hermes/shared`).
  *  Includes the paired light_colors/dark_colors overlays from #20379. */
-export type GatewaySkin = HermesSkin
+export type GatewaySkin = HermesSkin & {
+  banner_hero_small?: string
+}
 
 export interface GatewayCompletionItem {
   display: string
