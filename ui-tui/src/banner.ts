@@ -82,12 +82,25 @@ const colorize = (art: string[], gradient: readonly number[], c: ThemeColors): L
 export const LOGO_WIDTH = Math.max(...LOGO_ART.map(line => line.length))
 export const CADUCEUS_WIDTH = Math.max(...CADUCEUS_ART.map(line => line.length))
 
-export const logo = (c: ThemeColors, customLogo?: string): Line[] =>
-  customLogo ? parseRichMarkup(customLogo) : colorize(LOGO_ART, LOGO_GRADIENT, c)
+export const logo = (c: ThemeColors, customLogo?: string): Line[] => {
+  if (!customLogo) return colorize(LOGO_ART, LOGO_GRADIENT, c)
+  // Raw ANSI content from chafa → pass through as-is (parseRichMarkup would mangle it)
+  if (customLogo.includes('\x1b[')) return customLogo.split('\n').map(line => ['', line.trimEnd() || ' '] as Line)
+  return parseRichMarkup(customLogo)
+}
 
-export const caduceus = (c: ThemeColors, customHero?: string): Line[] =>
-  customHero ? parseRichMarkup(customHero) : colorize(CADUCEUS_ART, CADUC_GRADIENT, c)
+export const caduceus = (c: ThemeColors, customHero?: string): Line[] => {
+  if (!customHero) return colorize(CADUCEUS_ART, CADUC_GRADIENT, c)
+  // Raw ANSI content from chafa → pass through as-is (parseRichMarkup would mangle it)
+  if (customHero.includes('\x1b[')) return customHero.split('\n').map(line => ['', line.trimEnd() || ' '] as Line)
+  return parseRichMarkup(customHero)
+}
 
-export const artWidth = (lines: Line[]) => lines.reduce((m, [, t]) => Math.max(m, t.length), 0)
+const ANSI_RE = /\x1b\[[0-9;?]*[a-zA-Z]/g
+
+const stripAnsi = (s: string) => s.replace(ANSI_RE, '')
+
+export const artWidth = (lines: Line[]) =>
+  lines.reduce((m, [, t]) => Math.max(m, stripAnsi(t).length), 0)
 
 type Line = [string, string]

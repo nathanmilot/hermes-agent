@@ -310,6 +310,44 @@ def _render_sessions(ctx):
             age = format_age(now - float(entry.get("started_at") or now))
             print(f"                {entry.get('surface') or 'unknown':<17} {entry.get('session_id') or '?':<24} {age}")
 
+def _render_token_optimization(ctx):
+    """Token-optimization knobs: skill index format/filter, output cap, compression, memory."""
+    _section("Token Optimization")
+    try:
+        from agent.prompt_builder import parse_project_skill_config
+        cfg = parse_project_skill_config()
+        fmt = cfg.get("index_format", "full")
+        filter_active = bool(
+            cfg.get("include") or cfg.get("exclude")
+            or cfg.get("categories_include") or cfg.get("categories_exclude")
+        )
+        _kv("Index format:", fmt)
+        _kv("Skill filter:",
+            f"{check_mark(filter_active)} {'active' if filter_active else 'inactive'} (set in AGENTS.md)")
+    except Exception:
+        _kv("Index format:", color("unavailable", Colors.DIM))
+    try:
+        max_tok = ctx.config.get("model", {}).get("max_tokens")
+        comp_thresh = ctx.config.get("compression", {}).get("threshold")
+        reasoning = ctx.config.get("agent", {}).get("reasoning_effort", "")
+        if max_tok:
+            _kv("Output cap:", f"{max_tok:,} tokens/response")
+        if comp_thresh:
+            _kv("Compression:", f"{float(comp_thresh)*100:.0f}% threshold")
+        if reasoning:
+            _kv("Reasoning:", reasoning)
+        # Check memory compact
+        try:
+            from tools.memory_tool import MemoryStore
+            ms = MemoryStore()
+            _kv("Memory:", "compact summaries" if getattr(ms, "_compact", False) else "full entries")
+        except Exception:
+            pass
+    except Exception:
+        pass
+    _kv("Cost aware:", f"{check_mark(True)} active (concise-response directive)")
+    _kv("Skills:", "dynamically loaded & stowed (skill_view → skill_manage stow)")
+
 
 def _render_deep(ctx):
     if not ctx.deep:
@@ -344,7 +382,7 @@ def _render_footer(ctx):
 _SECTIONS = (
     _render_header, _render_environment, _render_api_keys, _render_auth_providers, _render_nous_gateway,
     _render_apikey_providers, _render_terminal, _render_platforms, _render_gateway, _render_cron,
-    _render_sessions, _render_deep, _render_footer)
+    _render_sessions, _render_token_optimization, _render_deep, _render_footer)
 
 
 def show_status(args):
