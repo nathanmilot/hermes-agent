@@ -188,10 +188,13 @@ export interface ProjectInfo {
 }
 
 export interface SessionInfo {
+  cost_awareness?: boolean
   cwd?: string
   fast?: boolean
   install_warning?: string
+  index_format?: string
   lazy?: boolean
+  max_tokens?: number | null
   mcp_servers?: McpServerStatus[]
   model: string
   profile_name?: string
@@ -199,6 +202,7 @@ export interface SessionInfo {
   reasoning_effort?: string
   release_date?: string
   service_tier?: string
+  skill_filter_active?: boolean
   skills: Record<string, string[]>
   system_prompt?: string
   tools: Record<string, string[]>

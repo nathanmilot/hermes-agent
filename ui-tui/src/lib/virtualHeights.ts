@@ -90,11 +90,24 @@ export const estimatedMsgHeight = (
   }
 ) => {
   if (msg.kind === 'intro') {
-    return msg.info?.version ? 9 : 5
+    // Banner (~6) + hero art (chafa ~11) + model/cwd/session (~3) +
+    // collapsible sections (4 headers) + optimization indicators + summary + border
+    return msg.info?.version ? 30 : 5
   }
 
   if (msg.kind === 'panel') {
-    return Math.max(3, (msg.panelData?.sections.length ?? 1) * 2 + 1)
+    const sections = msg.panelData?.sections ?? []
+    // border-top + title + border-bottom = 3 base
+    let h = 3
+    for (const s of sections) {
+      h += 1 // section title or spacing
+      h += s.rows?.length ?? 0 // key-value rows
+      h += s.items?.length ?? 0 // item rows
+      if (s.text) h += 1 // plain text section
+    }
+    // inter-section margins
+    h += Math.max(0, sections.length - 1)
+    return Math.max(3, h)
   }
 
   if (msg.kind === 'trail' && msg.todos?.length) {

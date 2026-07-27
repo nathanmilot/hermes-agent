@@ -2103,6 +2103,20 @@ def _session_info(agent, session: dict | None = None) -> dict:
         info["update_command"] = recommended_update_command()
     if live_agent and (warn := _probe_credentials(agent)):
         info["credential_warning"] = warn
+    # Optimization indicators — show which cost-saving features are active
+    try:
+        from agent.prompt_builder import parse_project_skill_config
+        cfg = parse_project_skill_config()
+        info["index_format"] = cfg.get("index_format", "full")
+        info["skill_filter_active"] = bool(
+            cfg.get("include") or cfg.get("exclude")
+            or cfg.get("categories_include") or cfg.get("categories_exclude")
+        )
+    except Exception:
+        info["index_format"] = "full"
+        info["skill_filter_active"] = False
+    info["max_tokens"] = getattr(agent, "max_tokens", None)
+    info["cost_awareness"] = True  # COST_AWARENESS_GUIDANCE always injected
     return info
 
 

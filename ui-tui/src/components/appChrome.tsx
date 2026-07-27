@@ -563,7 +563,7 @@ export function StatusRule({
       : stringWidth(status)
 
   const essentialWidth =
-    stringWidth('─ ') +
+    stringWidth('⚡ ') +
     batteryWidth +
     slotWidth +
     stringWidth(' │ ') +
@@ -673,7 +673,7 @@ export function StatusRule({
             renders as a separate shrinkable box below so a long notice
             ellipsizes instead of crushing model │ ctx (R3-M7). */}
         <Box flexDirection="row" flexShrink={0}>
-          <Text color={t.color.border}>{'─ '}</Text>
+          <Text color={t.color.border}>{'⚡ '}</Text>
           {showBattery ? (
             <Text color={batteryColorVal}>
               {batteryText}
