@@ -572,9 +572,9 @@ export function fromSkin(
   branding: Record<string, string>,
   bannerLogo = '',
   bannerHero = '',
-  bannerHeroSmall = '',
   toolPrefix = '',
-  helpHeader = ''
+  helpHeader = '',
+  bannerHeroSmall = ''
 ): Theme {
   const d = DEFAULT_THEME
   const c = (k: string) => colors[k]
