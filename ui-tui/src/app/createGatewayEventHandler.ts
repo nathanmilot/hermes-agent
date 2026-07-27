@@ -59,7 +59,8 @@ const themeForSkin = (s: GatewaySkin) => {
     s.banner_logo ?? '',
     s.banner_hero ?? '',
     s.tool_prefix ?? '',
-    s.help_header ?? ''
+    s.help_header ?? '',
+    s.banner_hero_small ?? ''
   )
 }
 
