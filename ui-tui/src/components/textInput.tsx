@@ -574,7 +574,6 @@ export function TextInput({
   voiceRecordKey = DEFAULT_VOICE_RECORD_KEY,
   placeholder = '',
   placeholderColor,
-  color,
   focus = true
 }: TextInputProps) {
   const [cur, setCur] = useState(value.length)
