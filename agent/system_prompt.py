@@ -437,6 +437,8 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
 
     # ── Context tier (cwd-dependent, may change between sessions) ─
     context_parts: List[str] = []
+    coding_workspace_parts: List[str] = []
+    coding_trailing_parts: List[str] = []
 
     if coding_workspace_parts:
         context_parts.extend(coding_workspace_parts)
