@@ -1459,6 +1459,8 @@ def _resolve_session_by_name_or_id(name_or_id: str) -> Optional[str]:
         else:
             # Try as title (with auto-latest for lineage)
             resolved_id = db.resolve_session_by_title(name_or_id)
+            if not resolved_id:
+                resolved_id = _resolve_session_fuzzy(db, name_or_id)
 
         if resolved_id:
             # Project forward through compression chain so resumes land on
@@ -1472,6 +1474,46 @@ def _resolve_session_by_name_or_id(name_or_id: str) -> Optional[str]:
         return resolved_id
     except Exception:
         pass
+    return None
+
+
+def _resolve_session_fuzzy(db, name: str) -> Optional[str]:
+    """Fallback for -c/--resume title resolution: tolerate truncated
+    (trailing ellipsis), case, and slightly mistyped titles.
+    Stage 1: substring match. Stage 2: difflib typo tolerance.
+    Single candidate -> resume it (with a notice); several -> list them.
+    """
+    import difflib
+
+    base = name.rstrip("\u2026").rstrip(".").strip()
+    if len(base) < 4:
+        return None
+    with db._read_ctx() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT title FROM sessions "
+            "WHERE archived = 0 AND title != '' AND title != ? "
+            "ORDER BY last_activity_at DESC",
+            (name,),
+        ).fetchall()
+    titles = [r["title"] for r in rows]
+    if not titles:
+        return None
+    lowered = {t.lower(): t for t in titles}
+    esc = base.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    subs = [t for t in titles if esc in t.lower()]
+    fuzzy = [
+        lowered[m]
+        for m in difflib.get_close_matches(base.lower(), list(lowered), n=4, cutoff=0.6)
+    ]
+    candidates = subs if subs else fuzzy
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        print(f"Resuming closest match: '{candidates[0]}'")
+        return db.resolve_session_by_title(candidates[0])
+    print(f"No exact match for '{name}'. Did you mean one of these?")
+    for c in candidates[:4]:
+        print(f"  {c}")
     return None
 
 
