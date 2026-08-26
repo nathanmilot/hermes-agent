@@ -162,8 +162,8 @@ function CollapseToggle({
 const SKILLS_MAX = 8
 const TOOLSETS_MAX = 8
 
-export function SessionPanel({ info, sid, t }: SessionPanelProps) {
-  const cols = useStdout().stdout?.columns ?? 100
+export function SessionPanel({ info, sid, t, maxWidth }: SessionPanelProps) {
+  const cols = maxWidth ?? useStdout().stdout?.columns ?? 100
   const heroLines = caduceus(t.color, t.bannerHero || undefined)
   const narrowHeroLines = caduceus(t.color, t.bannerHeroSmall || undefined)
   const artW = artWidth(heroLines) || CADUCEUS_WIDTH
@@ -506,6 +506,7 @@ interface PanelProps {
 
 interface SessionPanelProps {
   info: SessionInfo
+  maxWidth?: number
   sid?: string | null
   t: Theme
 }

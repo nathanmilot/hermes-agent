@@ -775,7 +775,6 @@ const isPasteResultPromise = (
 ): value is Promise<PasteResult> => !!value && typeof (value as PromiseLike<PasteResult>).then === 'function'
 
 export function TextInput({
-  color,
   columns = 80,
   value,
   onChange,

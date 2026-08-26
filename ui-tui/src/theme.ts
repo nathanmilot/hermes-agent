@@ -1,3 +1,7 @@
+import type { SkinBranding, SkinColors } from '@hermes/shared/skin'
+
+import { desaturate, grayOf, liftForContrast, mix, parseColor, relativeLuminance, toHex } from './lib/color.js'
+
 export interface ThemeColors {
   primary: string
   accent: string
@@ -13,6 +17,20 @@ export interface ThemeColors {
   ok: string
   error: string
   warn: string
+
+  /** Tool-call markers (● bullet, tool spinner). Defaults to `accent`. */
+  tool: string
+  /** Reasoning/thinking body text. Defaults to `muted`. */
+  thinking: string
+
+  /** Code-block syntax highlight. Default to accent/text/border/muted. */
+  syntaxString: string
+  syntaxNumber: string
+  syntaxKeyword: string
+  syntaxComment: string
+
+  /** Assistant role body text. Defaults to `text`. */
+  assistantText: string
 
   prompt: string
   sessionLabel: string
@@ -32,17 +50,6 @@ export interface ThemeColors {
   diffRemovedWord: string
 
   shellDollar: string
-
-  assistantText: string
-  /** Tool-call markers (● bullet, tool spinner). Defaults to accent. */
-  tool: string
-  /** Reasoning/thinking body text. Defaults to muted. */
-  thinking: string
-  /** Code-block syntax highlights. */
-  syntaxString: string
-  syntaxNumber: string
-  syntaxKeyword: string
-  syntaxComment: string
 }
 
 export interface ThemeBrand {
@@ -64,31 +71,13 @@ export interface Theme {
 }
 
 // ── Color math ───────────────────────────────────────────────────────
+//
+// All generic color computation lives in lib/color.ts (the color primitive);
+// this file keeps only the ANSI-256 remapping that is specific to the
+// limited-palette Apple Terminal path. contrastRatio/ensureContrast are
+// re-exported for existing consumers (tests, /theme-info).
 
-function parseHex(h: string): [number, number, number] | null {
-  const m = /^#?([0-9a-f]{6})$/i.exec(h)
-
-  if (!m) {
-    return null
-  }
-
-  const n = parseInt(m[1]!, 16)
-
-  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff]
-}
-
-function mix(a: string, b: string, t: number) {
-  const pa = parseHex(a)
-  const pb = parseHex(b)
-
-  if (!pa || !pb) {
-    return a
-  }
-
-  const lerp = (i: 0 | 1 | 2) => Math.round(pa[i] + (pb[i] - pa[i]) * t)
-
-  return '#' + ((1 << 24) | (lerp(0) << 16) | (lerp(1) << 8) | lerp(2)).toString(16).slice(1)
-}
+export { contrastRatio, ensureContrast } from './lib/color.js'
 
 const XTERM_6_LEVELS = [0, 95, 135, 175, 215, 255] as const
 const ANSI_LIGHT_MAX_LUMINANCE = 0.72
@@ -134,15 +123,8 @@ function xtermEightBitRgb(colorNumber: number): [number, number, number] {
   return [0, 0, 0]
 }
 
-function channelLuminance(value: number): number {
-  const normalized = value / 255
-
-  return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4
-}
-
-function relativeLuminance(red: number, green: number, blue: number): number {
-  return 0.2126 * channelLuminance(red) + 0.7152 * channelLuminance(green) + 0.0722 * channelLuminance(blue)
-}
+const rgbLuminance = (red: number, green: number, blue: number): number =>
+  relativeLuminance(toHex([red, green, blue])) ?? 0
 
 function rgbToHsl(red: number, green: number, blue: number): [number, number, number] {
   const rn = red / 255
@@ -160,11 +142,7 @@ function rgbToHsl(red: number, green: number, blue: number): [number, number, nu
   const saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min)
 
   const hue =
-    max === rn
-      ? (gn - bn) / delta + (gn < bn ? 6 : 0)
-      : max === gn
-        ? (bn - rn) / delta + 2
-        : (rn - gn) / delta + 4
+    max === rn ? (gn - bn) / delta + (gn < bn ? 6 : 0) : max === gn ? (bn - rn) / delta + 2 : (rn - gn) / delta + 4
 
   return [hue / 6, saturation, lightness]
 }
@@ -200,7 +178,7 @@ function bestReadableAnsiColor(red: number, green: number, blue: number): number
 
   for (let colorNumber = 16; colorNumber <= 255; colorNumber += 1) {
     const [candidateRed, candidateGreen, candidateBlue] = xtermEightBitRgb(colorNumber)
-    const candidateLuminance = relativeLuminance(candidateRed, candidateGreen, candidateBlue)
+    const candidateLuminance = rgbLuminance(candidateRed, candidateGreen, candidateBlue)
 
     if (candidateLuminance > ANSI_LIGHT_MAX_LUMINANCE) {
       continue
@@ -231,7 +209,7 @@ function bestReadableAnsiColor(red: number, green: number, blue: number): number
 }
 
 function normalizeAnsiForeground(color: string): string {
-  const rgb = parseHex(color)
+  const rgb = parseColor(color)
 
   if (!rgb) {
     return color
@@ -240,9 +218,10 @@ function normalizeAnsiForeground(color: string): string {
   const richAnsi = richEightBitColorNumber(rgb[0], rgb[1], rgb[2])
   const richRgb = xtermEightBitRgb(richAnsi)
 
-  const ansi = relativeLuminance(richRgb[0], richRgb[1], richRgb[2]) > ANSI_LIGHT_MAX_LUMINANCE
-    ? bestReadableAnsiColor(rgb[0], rgb[1], rgb[2])
-    : richAnsi
+  const ansi =
+    rgbLuminance(richRgb[0], richRgb[1], richRgb[2]) > ANSI_LIGHT_MAX_LUMINANCE
+      ? bestReadableAnsiColor(rgb[0], rgb[1], rgb[2])
+      : richAnsi
 
   return `ansi256(${ansi})`
 }
@@ -292,112 +271,170 @@ const cleanPromptSymbol = (s: string | undefined, fallback: string) => {
   return cleaned || fallback
 }
 
+// ── Seeds → palette ──────────────────────────────────────────────────
+//
+// A palette is BUILT, not enumerated: skins/base themes supply identity seeds
+// (text, primary, accent, semantic hues) and every secondary tone is derived
+// by the mix ladder against the background. This is the desktop token system
+// (seeds → color-mix → tokens) in terminal form — "dim" is definitionally a
+// derivative of the theme's own base colors and can never be incoherent.
+
+export interface ThemeSeeds {
+  accent: string
+  /** Identity fill override: active list-row chip (derived when omitted). */
+  activeRow?: string
+  bg: string
+  border?: string
+  error: string
+  /** Identity tone override: muted/dim text (derived when omitted). */
+  muted?: string
+  ok: string
+  primary: string
+  prompt?: string
+  /** Identity fill override: text-selection highlight (derived when omitted). */
+  selection?: string
+  shellDollar: string
+  statusBad: string
+  statusCritical: string
+  statusGood: string
+  statusWarn: string
+  /** Identity fill override: panel/status surface (derived when omitted). */
+  surface?: string
+  text: string
+  warn: string
+  /** Assistant role body text (derived from `text` when omitted). */
+  assistantText?: string
+}
+
+const DIFF_DARK = {
+  diffAdded: 'rgb(220,255,220)',
+  diffRemoved: 'rgb(255,220,220)',
+  diffAddedWord: 'rgb(36,138,61)',
+  diffRemovedWord: 'rgb(207,34,46)'
+}
+
+const DIFF_LIGHT = {
+  diffAdded: 'rgb(200,240,200)',
+  diffRemoved: 'rgb(240,200,200)',
+  diffAddedWord: 'rgb(27,94,32)',
+  diffRemovedWord: 'rgb(183,28,28)'
+}
+
+export function buildPalette(seeds: ThemeSeeds, isLight: boolean): ThemeColors {
+  const tones = deriveTones(seeds)
+  const surface = seeds.surface ?? tones.surface
+  const activeRow = seeds.activeRow ?? (seeds.surface ? mix(surface, seeds.accent, 0.22) : tones.activeRow)
+  const muted = seeds.muted ?? tones.muted
+
+  return {
+    primary: seeds.primary,
+    accent: seeds.accent,
+    border: seeds.border ?? tones.border,
+    text: seeds.text,
+    muted,
+    completionBg: surface,
+    completionCurrentBg: activeRow,
+    completionMetaBg: surface,
+    completionMetaCurrentBg: activeRow,
+
+    label: tones.label,
+    ok: seeds.ok,
+    error: seeds.error,
+    warn: seeds.warn,
+
+    // Element tokens: independently settable, but default to their semantic
+    // parents (tool marker → accent, reasoning body → muted).
+    tool: seeds.accent,
+    thinking: muted,
+
+    // Code-syntax tokens default to brand tokens (unchanged highlighting)
+    // but are independently skinnable.
+    syntaxString: seeds.accent,
+    syntaxNumber: seeds.text,
+    syntaxKeyword: seeds.border ?? tones.border,
+    syntaxComment: muted,
+
+    prompt: seeds.prompt ?? seeds.text,
+    // sessionLabel/sessionBorder track the muted tone — "same role, same
+    // colour" by design (#11300).
+    sessionLabel: muted,
+    sessionBorder: muted,
+
+    statusBg: surface,
+    statusFg: tones.statusFg,
+    statusGood: seeds.statusGood,
+    statusWarn: seeds.statusWarn,
+    statusBad: seeds.statusBad,
+    statusCritical: seeds.statusCritical,
+    selectionBg: seeds.selection ?? tones.selection,
+
+    ...(isLight ? DIFF_LIGHT : DIFF_DARK),
+    shellDollar: seeds.shellDollar,
+    assistantText: seeds.assistantText ?? seeds.text
+  }
+}
+
+export const DARK_SEEDS: ThemeSeeds = {
+  accent: '#FFBF00',
+  // The classic Hermes navy surfaces are IDENTITY, not derivation drift —
+  // keep them as explicit fill seeds (the ladder derives them for skins
+  // that don't care).
+  activeRow: '#333355',
+  bg: '#101014',
+  border: '#CD7F32',
+  error: '#ef5350',
+  ok: '#4caf50',
+  primary: '#FFD700',
+  prompt: '#FFF8DC',
+  selection: '#3a3a55',
+  shellDollar: '#4dabf7',
+  assistantText: '#6366f1',
+  statusBad: '#FF8C00',
+  statusCritical: '#FF6B6B',
+  statusGood: '#8FBC8F',
+  statusWarn: '#FFD700',
+  surface: '#1a1a2e',
+  text: '#FFF8DC',
+  warn: '#ffa726'
+}
+
+// Light-terminal seeds: darker golds/ambers that stay legible on white.
+// The classic light-mode Hermes look was never hand-authored: for years the
+// TUI emitted the DARK golds and hosts with xterm's minimumContrastRatio
+// (Cursor defaults to 4.5) lifted them against white — hue and saturation
+// kept, luminance clamped. These seeds are those exact lifts
+// (liftForContrast(dark, '#ffffff', 4.5)), so hosts WITHOUT a contrast pass
+// render the same thing Cursor always showed. Text/prompt stay ink — body
+// copy historically rendered in the terminal's default near-black fg.
+export const LIGHT_SEEDS: ThemeSeeds = {
+  accent: '#956E00',
+  bg: '#ffffff',
+  border: '#A56628',
+  error: '#C14240',
+  ok: '#367E39',
+  primary: '#867000',
+  prompt: '#2B2014',
+  shellDollar: '#377BB3',
+  assistantText: '#4f46e5',
+  statusBad: '#A65A00',
+  statusCritical: '#B94D4D',
+  statusGood: '#5C7A5C',
+  statusWarn: '#867000',
+  text: '#3D2F13',
+  warn: '#956115'
+}
+
 export const DARK_THEME: Theme = {
-  color: {
-    primary: '#FFD700',
-    accent: '#FFBF00',
-    border: '#CD7F32',
-    text: '#FFF8DC',
-    muted: '#CC9B1F',
-    // Bumped from the old `#B8860B` darkgoldenrod (~53% luminance) which
-    // read as barely-visible on dark terminals for long body text.  The
-    // new value sits ~60% luminance — readable without losing the "muted /
-    // secondary" semantic.  Field labels still use `label` (65%) which
-    // stays brighter so hierarchy holds.
-    completionBg: '#1a1a2e',
-    completionCurrentBg: '#333355',
-    completionMetaBg: '#1a1a2e',
-    completionMetaCurrentBg: '#333355',
-
-    label: '#DAA520',
-    ok: '#4caf50',
-    error: '#ef5350',
-    warn: '#ffa726',
-
-    prompt: '#FFF8DC',
-    // sessionLabel/sessionBorder intentionally track the `dim` value — they
-    // are "same role, same colour" by design.  fromSkin's banner_dim fallback
-    // relies on this pairing (#11300).
-    sessionLabel: '#CC9B1F',
-    sessionBorder: '#CC9B1F',
-
-    statusBg: '#1a1a2e',
-    statusFg: '#C0C0C0',
-    statusGood: '#8FBC8F',
-    statusWarn: '#FFD700',
-    statusBad: '#FF8C00',
-    statusCritical: '#FF6B6B',
-    selectionBg: '#3a3a55',
-
-    diffAdded: 'rgb(220,255,220)',
-    diffRemoved: 'rgb(255,220,220)',
-    diffAddedWord: 'rgb(36,138,61)',
-    diffRemovedWord: 'rgb(207,34,46)',
-    shellDollar: '#4dabf7',
-    assistantText: '#6366f1',
-    tool: '#FFBF00',
-    thinking: '#CC9B1F',
-    syntaxString: '#FFBF00',
-    syntaxNumber: '#FFF8DC',
-    syntaxKeyword: '#CD7F32',
-    syntaxComment: '#CC9B1F'
-  },
-
+  color: buildPalette(DARK_SEEDS, false),
   brand: BRAND,
-
   bannerLogo: '',
   bannerHero: '',
   bannerHeroSmall: ''
 }
 
-// Light-terminal palette: darker golds/ambers that stay legible on white
-// backgrounds. Same shape as DARK_THEME so `fromSkin` still layers on top
-// cleanly (#11300).
 export const LIGHT_THEME: Theme = {
-  color: {
-    primary: '#8B6914',
-    accent: '#A0651C',
-    border: '#7A4F1F',
-    text: '#3D2F13',
-    muted: '#7A5A0F',
-    completionBg: '#F5F5F5',
-    completionCurrentBg: mix('#F5F5F5', '#A0651C', 0.25),
-    completionMetaBg: '#F5F5F5',
-    completionMetaCurrentBg: mix('#F5F5F5', '#A0651C', 0.25),
-
-    label: '#7A5A0F',
-    ok: '#2E7D32',
-    error: '#C62828',
-    warn: '#E65100',
-
-    prompt: '#2B2014',
-    sessionLabel: '#7A5A0F',
-    sessionBorder: '#7A5A0F',
-
-    statusBg: '#F5F5F5',
-    statusFg: '#333333',
-    statusGood: '#2E7D32',
-    statusWarn: '#8B6914',
-    statusBad: '#D84315',
-    statusCritical: '#B71C1C',
-    selectionBg: '#D4E4F7',
-
-    diffAdded: 'rgb(200,240,200)',
-    diffRemoved: 'rgb(240,200,200)',
-    diffAddedWord: 'rgb(27,94,32)',
-    diffRemovedWord: 'rgb(183,28,28)',
-    shellDollar: '#1565C0',
-    assistantText: '#4f46e5',
-    tool: '#A0651C',
-    thinking: '#7A5A0F',
-    syntaxString: '#A0651C',
-    syntaxNumber: '#3D2F13',
-    syntaxKeyword: '#7A4F1F',
-    syntaxComment: '#7A5A0F'
-  },
-
+  color: buildPalette(LIGHT_SEEDS, true),
   brand: BRAND,
-
   bannerLogo: '',
   bannerHero: '',
   bannerHeroSmall: ''
@@ -772,100 +809,175 @@ export const DEFAULT_THEME: Theme = normalizeThemeForAnsiLightTerminal(
   DEFAULT_LIGHT_MODE
 )
 
+/**
+ * The skinless theme for the CURRENT light-mode signals. Unlike the frozen
+ * module-load DEFAULT_THEME, this re-reads the environment — so it picks up
+ * the OSC-11 background answer cached into HERMES_TUI_BACKGROUND after
+ * startup. Used when the terminal background arrives before (or without) a
+ * gateway skin.
+ */
+export function defaultThemeForCurrentBackground(env: NodeJS.ProcessEnv = process.env): Theme {
+  const isLight = detectLightMode(env)
+
+  return normalizeThemeForAnsiLightTerminal(isLight ? LIGHT_THEME : DARK_THEME, env, isLight)
+}
+
 // ── Skin → Theme ─────────────────────────────────────────────────────
 
+/** The skin's authored canvas as a #-prefixed hex, or null when absent/junk. */
+const authoredBackground = (raw: string | undefined): null | string => {
+  const v = (raw ?? '').trim()
+
+  return backgroundLuminance(v) === null ? null : v.startsWith('#') ? v : `#${v}`
+}
+
+/**
+ * A skin that authors a background OWNS its polarity: the TUI paints the
+ * terminal with it (applySkin → OSC-11), so contrast adaptation, the derived
+ * tone ladder, and ANSI light-terminal normalization must all run against the
+ * skin's canvas — not the host profile the skin just covered. (A pure-black
+ * skin on a light Apple Terminal otherwise gets its text remapped for a light
+ * background it painted over: invisible.) Host detection still governs skins
+ * without a background — they render on the terminal's own surface.
+ */
+export function skinIsLight(colors: SkinColors, env: NodeJS.ProcessEnv = process.env): boolean {
+  const authored = backgroundLuminance(colors['background'] ?? '')
+
+  return authored === null ? detectLightMode(env) : authored >= LUMA_LIGHT_THRESHOLD
+}
+
 export function fromSkin(
-  colors: Record<string, string>,
-  branding: Record<string, string>,
+  colors: SkinColors,
+  branding: SkinBranding,
   bannerLogo = '',
   bannerHero = '',
   toolPrefix = '',
   helpHeader = '',
   bannerHeroSmall = ''
 ): Theme {
-  const d = DEFAULT_THEME
+  // Polarity: the skin's own canvas when it authors one (see skinIsLight);
+  // otherwise live host detection (not the module-load snapshot — by the time
+  // the gateway skin arrives, the OSC-11 probe has usually answered and cached
+  // itself into HERMES_TUI_BACKGROUND. See #applySkin / syncThemeToTerminalBackground).
+  const skinBg = authoredBackground(colors['background'])
+  const isLight = skinIsLight(colors)
+  const bg = skinBg ?? referenceBackground(isLight)
+  const base = isLight ? LIGHT_SEEDS : DARK_SEEDS
+  const d = isLight ? LIGHT_THEME : DARK_THEME
   const c = (k: string) => colors[k]
+
   const hasSkinColors = Object.keys(colors).length > 0
 
-  const accent = c('ui_accent') ?? c('banner_accent') ?? d.color.accent
-  const bannerAccent = c('banner_accent') ?? c('banner_title') ?? d.color.accent
-  const muted = c('banner_dim') ?? d.color.muted
-  const completionBg = c('completion_menu_bg') ?? d.color.completionBg
+  // 1. Seeds: the skin's identity. Anything it doesn't define comes from the
+  //    base seeds for this polarity. The base's IDENTITY FILLS (Hermes navy
+  //    surfaces, gold muted) only carry over for the skinless default — a
+  //    skin with its own identity derives its fills from its own seeds.
+  const identityFills: Partial<ThemeSeeds> = hasSkinColors
+    ? {}
+    : { activeRow: base.activeRow, muted: base.muted, selection: base.selection, surface: base.surface }
 
-  const completionCurrentBg =
+  const seeds: ThemeSeeds = {
+    ...identityFills,
+    accent: c('ui_accent') ?? c('banner_accent') ?? base.accent,
+    bg,
+    border: c('ui_border') ?? c('banner_border') ?? base.border,
+    error: c('ui_error') ?? base.error,
+    ok: c('ui_ok') ?? base.ok,
+    primary: c('ui_primary') ?? c('banner_title') ?? base.primary,
+    prompt: c('prompt') ?? c('banner_text') ?? base.prompt,
+    shellDollar: c('shell_dollar') ?? base.shellDollar,
+    statusBad: c('status_bar_bad') ?? base.statusBad,
+    statusCritical: c('status_bar_critical') ?? c('ui_error') ?? base.statusCritical,
+    statusGood: c('status_bar_good') ?? c('ui_ok') ?? base.statusGood,
+    statusWarn: c('status_bar_warn') ?? c('ui_warn') ?? base.statusWarn,
+    text: c('ui_text') ?? c('banner_text') ?? base.text,
+    warn: c('ui_warn') ?? base.warn
+  }
+
+  // 2. Derive: every secondary tone is a color-mix of the seeds against the
+  //    REAL background — dim is a derivative of the skin's own identity.
+  const derived = buildPalette(seeds, isLight)
+
+  // 3. Authored tone overrides: a skin may still hand-tune any tone; the
+  //    derived ladder is the default, not a cage. Chip/selection re-derive
+  //    from the FINAL surface so dependents stay coherent with overrides.
+  // `background` is theme-sdk's cross-surface base: the TUI paints the
+  // terminal with it (applySkin → setTerminalBackground), so panels/status
+  // must sit on it too — fall the surface back to it below completion_menu_bg.
+  const surface = c('completion_menu_bg') ?? c('background') ?? derived.completionBg
+
+  // Re-mix the chip only when the skin authored its own surface; otherwise
+  // the derived value already carries the identity seeds (e.g. Hermes navy).
+  const activeRow =
     c('completion_menu_current_bg') ??
-    (hasSkinColors ? mix(completionBg, bannerAccent, 0.25) : d.color.completionCurrentBg)
+    (c('completion_menu_bg') ? mix(surface, seeds.accent, 0.22) : derived.completionCurrentBg)
 
-  const completionMetaBg = c('completion_menu_meta_bg') ?? completionBg
-  const completionMetaCurrentBg = c('completion_menu_meta_current_bg') ?? completionCurrentBg
+  const assembled: ThemeColors = {
+    ...derived,
+    muted: c('banner_dim') ?? derived.muted,
+    label: c('ui_label') ?? derived.label,
+    completionBg: surface,
+    completionCurrentBg: activeRow,
+    completionMetaBg: c('completion_menu_meta_bg') ?? surface,
+    completionMetaCurrentBg: c('completion_menu_meta_current_bg') ?? activeRow,
+    sessionLabel: c('session_label') ?? c('banner_dim') ?? derived.sessionLabel,
+    sessionBorder: c('session_border') ?? c('banner_dim') ?? derived.sessionBorder,
+    statusBg: c('status_bar_bg') ?? surface,
+    statusFg: c('status_bar_text') ?? c('ui_text') ?? c('banner_text') ?? derived.statusFg,
+    selectionBg: c('selection_bg') ?? c('completion_menu_current_bg') ?? derived.selectionBg,
+    // Element tokens + skinnable diffs (theme-sdk): overridable, else the
+    // derived defaults (tool→accent, thinking→muted, diff_* → DIFF_* ladder).
+    // thinking tracks the EFFECTIVE muted (banner_dim override included), not
+    // just derived.muted, so recoloring muted carries the reasoning body with it.
+    tool: c('ui_tool') ?? derived.tool,
+    thinking: c('ui_thinking') ?? c('banner_dim') ?? derived.thinking,
+    diffAdded: c('diff_added') ?? derived.diffAdded,
+    diffRemoved: c('diff_removed') ?? derived.diffRemoved,
+    diffAddedWord: c('diff_added_word') ?? derived.diffAddedWord,
+    diffRemovedWord: c('diff_removed_word') ?? derived.diffRemovedWord,
+    // Code-syntax tokens: overridable, else the derived brand-token defaults.
+    syntaxString: c('syntax_string') ?? derived.syntaxString,
+    syntaxNumber: c('syntax_number') ?? derived.syntaxNumber,
+    syntaxKeyword: c('syntax_keyword') ?? derived.syntaxKeyword,
+    syntaxComment: c('syntax_comment') ?? c('banner_dim') ?? derived.syntaxComment,
+    assistantText: c('assistant_text') ?? derived.assistantText
+  }
 
-  return normalizeThemeForAnsiLightTerminal({
-    color: {
-      primary: c('ui_primary') ?? c('banner_title') ?? d.color.primary,
-      accent,
-      border: c('ui_border') ?? c('banner_border') ?? d.color.border,
-      text: c('ui_text') ?? c('banner_text') ?? d.color.text,
-      muted,
-      completionBg,
-      completionCurrentBg,
-      completionMetaBg,
-      completionMetaCurrentBg,
+  // 4. Guard: contrast floors against the real background + fill polarity.
+  //    Wrong-polarity fills fall back to the DERIVED value, which is
+  //    polarity-correct by construction (mixed from the background itself).
+  //    ANSI-limited light Apple Terminal keeps its bespoke ansi256
+  //    normalization (below) instead.
+  const adapted = shouldNormalizeAnsiLightTheme(process.env, isLight)
+    ? assembled
+    : adaptColorsToBackground(assembled, isLight, derived, bg)
 
-      label: c('ui_label') ?? d.color.label,
-      ok: c('ui_ok') ?? d.color.ok,
-      error: c('ui_error') ?? d.color.error,
-      warn: c('ui_warn') ?? d.color.warn,
+  return normalizeThemeForAnsiLightTerminal(
+    {
+      // The element tokens theme-sdk introduced (ui_primary, ui_text,
+      // ui_border, ui_ok/warn/error, ui_tool, ui_thinking, shell_dollar,
+      // status_bar_*, diff_*) are read into `seeds`/`assembled` above and
+      // flow through buildPalette → adaptColorsToBackground, so `adapted`
+      // already honors them AND applies #20379's contrast/polarity machinery.
+      // Emitting a hand-mapped color block here would bypass that adaptation
+      // and regress theme quality.
+      color: adapted,
 
-      prompt: c('prompt') ?? c('banner_text') ?? d.color.prompt,
-      sessionLabel: c('session_label') ?? muted,
-      sessionBorder: c('session_border') ?? muted,
+      brand: {
+        name: branding.agent_name ?? d.brand.name,
+        icon: d.brand.icon,
+        prompt: cleanPromptSymbol(branding.prompt_symbol, d.brand.prompt),
+        welcome: branding.welcome ?? d.brand.welcome,
+        goodbye: branding.goodbye ?? d.brand.goodbye,
+        tool: toolPrefix || d.brand.tool,
+        helpHeader: branding.help_header ?? (helpHeader || d.brand.helpHeader)
+      },
 
-      statusBg: d.color.statusBg,
-      statusFg: d.color.statusFg,
-      statusGood: c('ui_ok') ?? d.color.statusGood,
-      statusWarn: c('ui_warn') ?? d.color.statusWarn,
-      statusBad: d.color.statusBad,
-      statusCritical: d.color.statusCritical,
-      selectionBg: c('selection_bg') ?? c('completion_menu_current_bg') ?? (hasSkinColors ? completionCurrentBg : d.color.selectionBg),
-
-      diffAdded: c('diff_added') ?? d.color.diffAdded,
-      diffRemoved: c('diff_removed') ?? d.color.diffRemoved,
-      diffAddedWord: c('diff_added_word') ?? d.color.diffAddedWord,
-      diffRemovedWord: c('diff_removed_word') ?? d.color.diffRemovedWord,
-      shellDollar: c('shell_dollar') ?? d.color.shellDollar,
-      assistantText: c('assistant_text') ?? d.color.assistantText,
-      tool: c('ui_tool') ?? d.color.accent,
-      thinking: c('ui_thinking') ?? c('banner_dim') ?? d.color.muted,
-      syntaxString: c('syntax_string') ?? d.color.accent,
-      syntaxNumber: c('syntax_number') ?? d.color.text,
-      syntaxKeyword: c('syntax_keyword') ?? d.color.border,
-      syntaxComment: c('syntax_comment') ?? d.color.muted
+      bannerLogo,
+      bannerHero,
+      bannerHeroSmall
     },
-
-    brand: {
-      name: branding.agent_name ?? d.brand.name,
-      icon: d.brand.icon,
-      prompt: cleanPromptSymbol(branding.prompt_symbol, d.brand.prompt),
-      welcome: branding.welcome ?? d.brand.welcome,
-      goodbye: branding.goodbye ?? d.brand.goodbye,
-      tool: toolPrefix || d.brand.tool,
-      helpHeader: branding.help_header ?? (helpHeader || d.brand.helpHeader)
-    },
-
-    bannerLogo,
-    bannerHero,
-    bannerHeroSmall
-  }, process.env, DEFAULT_LIGHT_MODE)
+    process.env,
+    isLight
+  )
 }
-}
-
-export function defaultThemeForCurrentBackground(env: NodeJS.ProcessEnv = process.env): Theme {
-  const isLight = detectLightMode(env)
-  return normalizeThemeForAnsiLightTerminal(isLight ? LIGHT_THEME : DARK_THEME, env, isLight)
-}
-
-export function skinIsLight(colors: Record<string, string>, env: NodeJS.ProcessEnv = process.env): boolean {
-  const bg = (colors['background'] ?? '').trim()
-  if (!bg) return detectLightMode(env)
-  const lum = backgroundLuminance(bg)
-  return lum !== null ? lum >= LUMA_LIGHT_THRESHOLD : detectLightMode(env)
