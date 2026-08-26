@@ -7,6 +7,7 @@ import hermes_bootstrap
 
 hermes_bootstrap.harden_import_path()
 
+import faulthandler
 import json
 import logging
 import signal
@@ -238,7 +239,30 @@ def _write_or_exit(payload: dict, reason: str) -> None:
         sys.exit(0)
 
 
+def _enable_faulthandler() -> None:
+    """Dump all-thread Python stacks to a file on SIGSEGV/SIGABRT.
+
+    The TUI gateway child has been dying with interpreter-level null
+    derefs (dmesg: fault at addr 0/8/13, no Python trace anywhere).
+    stderr is drained into the UI feed (in-memory), so the PYTHONFAULTHANDLER
+    env var would lose the dump on crash; an explicit file survives.
+    Mirrors gateway/run.py's setup (#70344).
+    """
+    try:
+        _fh_dir = os.path.dirname(_CRASH_LOG)
+        os.makedirs(_fh_dir, exist_ok=True)
+        _fh = open(
+            os.path.join(_fh_dir, "tui_gateway_faulthandler.log"),
+            "a",
+            encoding="utf-8",
+        )
+        faulthandler.enable(file=_fh, all_threads=True)
+    except Exception:
+        logger.debug("faulthandler enable failed", exc_info=True)
+
+
 def main():
+    _enable_faulthandler()
     _install_sidecar_publisher()
 
     # The heartbeat row lets the orphan sweep tell "live but idle" from "truly orphaned",
