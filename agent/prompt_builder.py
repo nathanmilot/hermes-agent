@@ -1183,6 +1183,11 @@ def _current_session_platform_hint() -> str:
 def build_skills_system_prompt(
     available_tools: "set[str] | None" = None, available_toolsets: "set[str] | None" = None,
     compact_categories: "frozenset[str] | None" = None, skills_dir_override: "Path | None" = None,
+    skill_include: "list[str] | None" = None,
+    skill_exclude: "list[str] | None" = None,
+    categories_include: "list[str] | None" = None,
+    categories_exclude: "list[str] | None" = None,
+    index_format: str = "keywords",
 ) -> str:
     """Compact skill index for the system prompt.
 
@@ -1205,7 +1210,18 @@ def build_skills_system_prompt(
         if not skills_dir.exists() and not external_dirs and not project_dirs:
             return ""
         return _build_skills_system_prompt_inner(
-            skills_dir, external_dirs, available_tools, available_toolsets, compact_categories, project_dirs)
+            skills_dir,
+            external_dirs,
+            available_tools,
+            available_toolsets,
+            compact_categories,
+            project_dirs=project_dirs,
+            skill_include=skill_include,
+            skill_exclude=skill_exclude,
+            categories_include=categories_include,
+            categories_exclude=categories_exclude,
+            index_format=index_format,
+        )
     finally:
         if _home_token is not None:
             reset_hermes_home_override(_home_token)
@@ -1321,6 +1337,11 @@ def _build_skills_system_prompt_inner(
     skills_dir: "Path", external_dirs: "list[Path]", available_tools: "set[str] | None",
     available_toolsets: "set[str] | None", compact_categories: "frozenset[str] | None",
     project_dirs: "list[Path] | None" = None,
+    skill_include: "list[str] | None" = None,
+    skill_exclude: "list[str] | None" = None,
+    categories_include: "list[str] | None" = None,
+    categories_exclude: "list[str] | None" = None,
+    index_format: str = "keywords",
 ) -> str:
     # The resolved platform is part of the key: per-platform disabled-skill lists need distinct cache entries.
     _platform_hint = _current_session_platform_hint()
