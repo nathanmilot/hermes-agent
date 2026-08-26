@@ -31,43 +31,33 @@ const mountTrail = (reasoningActive: boolean, sections?: Record<string, string>)
     output += chunk.toString()
   })
 
-  const instance = renderSync(
+  const trail = (active: boolean) => (
     <ToolTrail
       reasoning="Live reasoning text."
-      reasoningActive={reasoningActive}
+      reasoningActive={active}
       sections={sections ?? { thinking: 'collapsed' }}
       t={DEFAULT_THEME}
-    />,
-    {
-      patchConsole: false,
-      stderr: stderr as NodeJS.WriteStream,
-      stdin: stdin as NodeJS.ReadStream,
-      stdout: stdout as NodeJS.WriteStream
-    }
+    />
   )
+
+  const instance = renderSync(trail(reasoningActive), {
+    patchConsole: false,
+    stderr: stderr as NodeJS.WriteStream,
+    stdin: stdin as NodeJS.ReadStream,
+    stdout: stdout as NodeJS.WriteStream
+  })
 
   // The PassThrough accumulates every repaint, and a collapsed panel stops
   // repainting entirely once settled — so assert on the FINAL chevron state
   // in the accumulated output rather than the tail after a clear().
   const finalChevronOpen = () => stripAnsi(output).lastIndexOf('▾ ') > stripAnsi(output).lastIndexOf('▸ ')
 
-  return { finalChevronOpen, instance }
+  return { finalChevronOpen, instance, trail }
 }
 
-describe('ToolTrail — collapsed mode auto-expands while reasoning is live', () => {
-  it('opens (▾) when reasoningActive is true under sections.thinking: collapsed', async () => {
+describe('ToolTrail — collapsed mode stays manual while reasoning is live', () => {
+  it('stays closed (▸) while reasoningActive is true under sections.thinking: collapsed', async () => {
     const { finalChevronOpen, instance } = mountTrail(true)
-
-    await flushEffects()
-
-    expect(finalChevronOpen()).toBe(true)
-
-    instance.unmount()
-    instance.cleanup()
-  })
-
-  it('collapses (▸) when reasoningActive is false under sections.thinking: collapsed', async () => {
-    const { finalChevronOpen, instance } = mountTrail(false)
 
     await flushEffects()
 
@@ -77,23 +67,14 @@ describe('ToolTrail — collapsed mode auto-expands while reasoning is live', ()
     instance.cleanup()
   })
 
-  it('closes the panel when the reasoning phase ends mid-turn (rerender)', async () => {
-    const { finalChevronOpen, instance } = mountTrail(true)
+  it('stays closed after the reasoning phase ends mid-turn (rerender)', async () => {
+    const { finalChevronOpen, instance, trail } = mountTrail(true)
 
     await flushEffects()
 
-    expect(finalChevronOpen()).toBe(true)
-
     // Reasoning phase finished (final answer / tool call started) — the
-    // turn's reasoningActive drops and the panel must collapse.
-    instance.rerender(
-      <ToolTrail
-        reasoning="Live reasoning text."
-        reasoningActive={false}
-        sections={{ thinking: 'collapsed' }}
-        t={DEFAULT_THEME}
-      />
-    )
+    // panel must remain closed: collapsed is entirely manual.
+    instance.rerender(trail(false))
 
     await flushEffects()
 
@@ -109,7 +90,7 @@ describe('ToolTrail — collapsed mode auto-expands while reasoning is live', ()
     await flushEffects()
 
     // `expanded` is a manual preference: reasoningActive=false must NOT
-    // force it closed (the auto behavior only applies to `collapsed`).
+    // force it closed.
     expect(finalChevronOpen()).toBe(true)
 
     instance.unmount()
