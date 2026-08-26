@@ -508,7 +508,13 @@ def _is_profile_skill_command(session: dict, base: str) -> bool:
 def _dispatch_plugin(rid, params, session, name, arg):
     if handler := _plugin_command_handler(name):
         with contextlib.suppress(Exception):
-            return _ok(rid, {"type": "plugin", "output": _run_plugin_command(handler, arg)})
+            from hermes_cli.plugins import resolve_plugin_command_result
+            result = resolve_plugin_command_result(handler(arg))
+            # Dispatch-shaped dict returns hand a prompt to the agent
+            # (TUI renders "send"/"skill" as real messages, not popups).
+            if isinstance(result, dict) and result.get("type") in ("send", "skill", "prefill"):
+                return _ok(rid, result)
+            return _ok(rid, {"type": "plugin", "output": str(result or "")})
     return None
 
 
@@ -853,7 +859,15 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 4018, f"skill command: use command.dispatch for /{base}")
     if plugin_handler := _plugin_command_handler(base) if base else None:
         try:
-            return _ok(rid, {"output": _run_plugin_command(plugin_handler, arg) or "(no output)"})
+            # Plugin handlers may return a dispatch-shaped dict (e.g.
+            # {"type": "send", "message": ...}) to hand a prompt to the
+            # agent — the TUI renders those as real messages instead of
+            # a popup. String results keep the pager path.
+            from hermes_cli.plugins import resolve_plugin_command_result
+            raw = resolve_plugin_command_result(plugin_handler(arg))
+            if isinstance(raw, dict) and raw.get("type") in ("send", "skill", "prefill"):
+                return _ok(rid, raw)
+            return _ok(rid, {"output": str(raw or "(no output)")})
         except Exception as e:
             return _ok(rid, {"output": f"Plugin command error: {e}"})
     worker = session.get("slash_worker")
