@@ -19,6 +19,15 @@ describe('shouldPreserveCtrlJNewline', () => {
   it('keeps bare local POSIX LF-compatible prompts submitting on Ctrl+J', () => {
     expect(shouldPreserveCtrlJNewline({ TERM: 'xterm-256color' })).toBe(false)
   })
+
+  it('preserves Ctrl+J as newline on WSL2 with a store-named distro (Ubuntu)', () => {
+    expect(
+      shouldPreserveCtrlJNewline({ WSL_DISTRO_NAME: 'Ubuntu', WSL_INTEROP: '/run/WSL/1_interop' })
+    ).toBe(true)
+    // Legacy default distro name and WSL1 (no interop) also count.
+    expect(shouldPreserveCtrlJNewline({ WSL_DISTRO_NAME: 'Microsoft-WSL' })).toBe(true)
+    expect(shouldPreserveCtrlJNewline({ WSL_INTEROP: '/run/WSL/2_interop' })).toBe(true)
+  })
 })
 
 describe('shouldPassThroughToGlobalHandler', () => {
