@@ -275,7 +275,7 @@ export function shouldPreserveCtrlJNewline(env: MinimalEnv = process.env): boole
     return true
   }
 
-  return (env.WSL_DISTRO_NAME ?? '').toLowerCase().includes('microsoft')
+  return !!((env.WSL_DISTRO_NAME ?? '') || (env.WSL_INTEROP ?? ''))
 }
 
 type ReturnDecisionKey = {
