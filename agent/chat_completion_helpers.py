@@ -980,12 +980,27 @@ class _RequestClientRegistry:
         with self.lock:
             request_client, request_kind, owner_tid = self.client, self.kind, self.owner_tid
             stranger_thread = (
-                request_kind != "stream"
-                and request_client is not None
+                request_client is not None
                 and owner_tid is not None
                 and owner_tid != threading.get_ident()
             )
             if stranger_thread:
+                # A registered stream handle (kind="stream") must ALSO go
+                # through the stranger-thread abort: closing the httpx response
+                # from a foreign thread frees the SSL object while the worker is
+                # blocked inside SSL_read (captured: segfault in ssl.py read via
+                # the openai stream). Shutdown unblocks the read without
+                # releasing the FD (#29507-class race); the worker closes the
+                # handle from its own thread on the way out.
+                if request_kind == "stream":
+                    # Only fall back to the unsafe close() when no socket was
+                    # found (worker between IOs, so no read is in flight);
+                    # otherwise the worker stays blocked forever without the
+                    # shutdown.
+                    if self.agent._force_close_tcp_sockets(request_client) > 0:
+                        return
+                    self._close_stream_handle(request_client, reason)
+                    return
                 abort = (self.agent._abort_request_anthropic_client if request_kind == "anthropic_messages"
                          else self.agent._abort_request_openai_client)
                 abort(request_client, reason=reason)
