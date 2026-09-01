@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import queue
+import re
 import sys
 import threading
 from collections import OrderedDict
@@ -313,6 +314,15 @@ TOOL_USE_ENFORCEMENT_GUIDANCE = (
     "you have tools available that can accomplish the task, use them instead of telling the user what you would do.\n"
     "Every response should either (a) contain tool calls that make progress, or (b) deliver a final result to the "
     "user. Responses that only describe intentions without acting are not acceptable."
+)
+
+COST_AWARENESS_GUIDANCE = (
+    "# Cost awareness\n"
+    "Output tokens are expensive. Be as concise as possible in every response.\n"
+    "Prefer short answers over long ones. One sentence is better than three.\n"
+    "When delivering results, state the outcome — not the journey. Skip narration.\n"
+    "Use tools for detail (read_file, terminal) rather than describing output inline.\n"
+    "If a response can be under 100 words, keep it under 100 words."
 )
 
 # "muse" = Meta Muse Spark: on defaults it answers in prose with 0 tool calls and the turn closes on
@@ -1446,8 +1456,95 @@ def _truncate_content(
     return content[:head_chars] + marker + content[-tail_chars:]
 
 
-def load_soul_md(context_length: Optional[int] = None, home_override: "Path | None" = None) -> Optional[str]:
-    """SOUL.md from HERMES_HOME (identity slot #1), or None.
+def parse_project_skill_config(cwd: "str | None" = None) -> dict:
+    """Extract skills.include / skills.exclude / skills.categories from context files.
+
+    Reads .hermes.md / AGENTS.md / CLAUDE.md (first found wins) and looks for
+    skill directives. Falls back to config.yaml ``skills.project`` section.
+
+    Returns dict with optional keys: include, exclude, categories_include,
+    categories_exclude, index_format. All values are lists of strings.
+
+    Supported formats in context files:
+      skills.include: [skill1, skill2]
+      skills.exclude: [cat1, cat2]
+      skills.categories.include: [software-development, github]
+      skills.categories.exclude: [gaming, smart-home]
+      skills.index_format: compact
+    """
+    result: dict = {}
+    cwd_path = Path(cwd).resolve() if cwd else Path.cwd()
+
+    # Try context files first
+    hermes_md = _find_hermes_md(cwd_path)
+    context_path = hermes_md
+    if not context_path:
+        for name in ["AGENTS.md", "agents.md", "CLAUDE.md", "claude.md"]:
+            candidate = cwd_path / name
+            if candidate.exists():
+                context_path = candidate
+                break
+
+    if context_path:
+        try:
+            content = context_path.read_text(encoding="utf-8")
+            for line in content.splitlines():
+                line = line.strip()
+                m = re.match(r'skills?\.include:\s*\[(.+?)\]', line, re.IGNORECASE)
+                if m:
+                    items = [s.strip().strip("'\"") for s in m.group(1).split(",") if s.strip()]
+                    if items:
+                        result["include"] = items
+                    continue
+                m = re.match(r'skills?\.exclude:\s*\[(.+?)\]', line, re.IGNORECASE)
+                if m:
+                    items = [s.strip().strip("'\"") for s in m.group(1).split(",") if s.strip()]
+                    if items:
+                        result["exclude"] = items
+                    continue
+                m = re.match(r'skills?\.categories\.include:\s*\[(.+?)\]', line, re.IGNORECASE)
+                if m:
+                    items = [s.strip().strip("'\"") for s in m.group(1).split(",") if s.strip()]
+                    if items:
+                        result["categories_include"] = items
+                    continue
+                m = re.match(r'skills?\.categories\.exclude:\s*\[(.+?)\]', line, re.IGNORECASE)
+                if m:
+                    items = [s.strip().strip("'\"") for s in m.group(1).split(",") if s.strip()]
+                    if items:
+                        result["categories_exclude"] = items
+                    continue
+                m = re.match(r'skills?\.index_format:\s*(\S+)', line, re.IGNORECASE)
+                if m:
+                    result["index_format"] = m.group(1).strip().strip("'\"")
+        except Exception as e:
+            logger.debug("Failed to parse skill config from %s: %s", context_path, e)
+
+    # Fall back to config.yaml
+    if not result:
+        try:
+            from hermes_cli.config import load_config
+            cfg = load_config() or {}
+            project_cfg = cfg.get("skills", {}).get("project", {})
+            if isinstance(project_cfg, dict):
+                for key in ("include", "exclude", "categories_include", "categories_exclude"):
+                    val = project_cfg.get(key)
+                    if isinstance(val, list) and val:
+                        result[key] = [str(v) for v in val]
+                fmt = project_cfg.get("index_format")
+                if fmt and isinstance(fmt, str):
+                    result.setdefault("index_format", fmt)
+        except Exception:
+            pass
+
+    return result
+
+
+def load_soul_md(
+    context_length: Optional[int] = None,
+    home_override: "Path | None" = None,
+) -> Optional[str]:
+    """Load SOUL.md from HERMES_HOME and return its content, or None.
 
     Callers must pass ``skip_soul=True`` to ``build_context_files_prompt`` so it isn't injected twice.
     ``home_override`` pins the profile home (a thread that lost the HERMES_HOME ContextVar reads the wrong one).
