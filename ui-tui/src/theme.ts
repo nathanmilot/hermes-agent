@@ -879,6 +879,7 @@ export function fromSkin(
   const seeds: ThemeSeeds = {
     ...identityFills,
     accent: c('ui_accent') ?? c('banner_accent') ?? base.accent,
+    assistantText: c('assistant_text') ?? base.assistantText,
     bg,
     border: c('ui_border') ?? c('banner_border') ?? base.border,
     error: c('ui_error') ?? base.error,

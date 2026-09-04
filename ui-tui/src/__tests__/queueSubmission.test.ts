@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ComposerToken } from '../app/interfaces.js'
-import { expandPasteTokens, prepareSlashSubmission, queueItemFromSlash } from '../app/useSubmission.js'
+import { busyQueueItem, expandPasteTokens, prepareSlashSubmission, queueItemFromSlash } from '../app/useSubmission.js'
 import { imageToken } from '../domain/attachments.js'
 
 describe('/queue collapsed paste submission', () => {
@@ -54,5 +54,32 @@ describe('prepareSlashSubmission', () => {
 
   it('is a no-op on a token-free command', () => {
     expect(prepareSlashSubmission('/model opus', [])).toEqual({ command: '/model opus', display: '/model opus' })
+  })
+})
+
+describe('busyQueueItem (submit-while-busy paste expansion)', () => {
+  // Regression for the label-leak the user hit repeatedly: a collapsed paste
+  // submitted while the turn is busy went through handleBusyInput's
+  // send(item.text) AFTER clearIn() had wiped tokensRef, so the expansion was
+  // a no-op and the agent received the literal [[ … ]] label and never saw
+  // the pasted content.
+  it('expands the payload to full paste content while keeping the label for display', () => {
+    const label = '[[ See attached - -.. [94 lines] .. rivacy@convey.it. Thank You. ]]'
+    const text = 'See attached -\n'.repeat(93) + 'Privacy@convey.it. Thank You.'
+    const tokens: ComposerToken[] = [{ kind: 'paste', label, text }]
+
+    const item = busyQueueItem(`here it is: ${label}`, tokens)
+
+    expect(item.display).toBe(`here it is: ${label}`)
+    expect(item.text).toBe(`here it is: ${text}`)
+  })
+
+  it('is a no-op for token-free text (recall round-trip)', () => {
+    expect(busyQueueItem('plain old text', [])).toEqual({ display: 'plain old text', text: 'plain old text' })
+  })
+
+  it('leaves an unmatched label intact rather than dropping the user text', () => {
+    const label = '[[ orphan [2 lines] ]]'
+    expect(busyQueueItem(label, []).text).toBe(label)
   })
 })

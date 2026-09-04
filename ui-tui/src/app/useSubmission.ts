@@ -58,6 +58,20 @@ export const prepareSlashSubmission = (display: string, tokens: ComposerToken[])
   display
 })
 
+/**
+ * Envelope for a submission that cannot go inline (busy turn, no session yet):
+ * display keeps the compact `[[ … ]]` label the user sees, text carries the
+ * FULLY EXPANDED payload. This is the busy-path complement to the mainline
+ * `send(submission.text, …)` fix: clearIn() wipes the token table before
+ * handleBusyInput actually sends, so any re-expansion there is a no-op and a
+ * collapsed paste would reach the agent as its literal label.
+ */
+export const busyQueueItem = (full: string, submissionTokens: ComposerToken[]): QueueItem => {
+  const submission = prepareSubmission(full, submissionTokens)
+
+  return queueItem(submission.text, submission.display)
+}
+
 export const shouldInterpolateSubmission = (display: string) => hasInterpolation(display)
 
 export function useSubmission(opts: UseSubmissionOptions) {
@@ -243,8 +257,10 @@ export function useSubmission(opts: UseSubmissionOptions) {
       // The gateway owns the atomic redirect decision because it knows whether
       // the agent is in model generation, tool execution, or an older runtime.
       // Reuse the normal submit pipeline so the correction gets its user bubble
-      // and file-drop interpolation exactly once.
-      send(item.text)
+      // and file-drop interpolation exactly once. text is already expanded by
+      // the caller (busyQueueItem / queue-item resolution); keep the compact
+      // label as display, matching the mainline submit path.
+      send(item.text, true, item.display, value => value)
     },
     [composerActions, gw, send, sys]
   )
@@ -297,7 +313,8 @@ export function useSubmission(opts: UseSubmissionOptions) {
 
       if (!live.sid) {
         composerActions.pushHistory(toHistory)
-        composerActions.enqueue(full)
+        const queued = busyQueueItem(full, submissionTokens)
+        composerActions.enqueue(queued.text, queued.display)
         composerActions.clearIn()
 
         return
@@ -314,24 +331,29 @@ export function useSubmission(opts: UseSubmissionOptions) {
           return
         }
 
+        // Re-expand from the pre-clearIn token snapshot: the user's edit may
+        // carry a paste label (or a fresh one from pasting into the queue
+        // editor), and tokensRef is already empty at this point.
+        const pickedResolved = prepareSubmission(picked.text, submissionTokens)
+
         if (getUiState().busy) {
           // 'interrupt' / 'steer' should reach the live turn instead of
           // silently going back to the queue.  handleBusyInput resolves
           // mode-specific behavior (interrupt-and-send, steer, or queue).
           if (getUiState().busyInputMode === 'queue') {
-            return composerActions.prependQueue(picked)
+            return composerActions.prependQueue({ display: pickedResolved.display, text: pickedResolved.text })
           }
 
-          return handleBusyInput(picked, { fallbackToFront: true })
+          return handleBusyInput({ display: pickedResolved.display, text: pickedResolved.text }, { fallbackToFront: true })
         }
 
-        return sendQueued(picked.text)
+        return sendQueued(pickedResolved.text)
       }
 
       composerActions.pushHistory(toHistory)
 
       if (getUiState().busy) {
-        return handleBusyInput(queueItem(full))
+        return handleBusyInput(busyQueueItem(full, submissionTokens))
       }
 
       if (shouldInterpolateSubmission(full)) {

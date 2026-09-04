@@ -4,6 +4,7 @@ import unicodeSpinners from 'unicode-animations'
 
 import { artWidth, caduceus, CADUCEUS_WIDTH, logo, LOGO_WIDTH } from '../banner.js'
 import { flat } from '../lib/text.js'
+import { ShimmerRows } from './loaders.js'
 import type { Theme } from '../theme.js'
 import type { PanelSection, SessionInfo } from '../types.js'
 
@@ -244,7 +245,20 @@ export function SessionPanel({ info, sid, t, maxWidth }: SessionPanelProps) {
   const toolEntries = Object.entries(info.tools).sort()
   const toolsTotal = flat(info.tools).length
 
-  const toolsBody = () => {
+  const SKELETON_ROWS: readonly (readonly [number, number])[] = [
+  [7, 30],
+  [7, 9],
+  [14, 12],
+  [12, 12],
+  [7, 7],
+  [10, 13]
+]
+
+const toolsBody = () => {
+    if (info.lazy && toolEntries.length === 0) {
+      return <ShimmerRows color={t.color.muted} highlight={t.color.label} rows={SKELETON_ROWS} />
+    }
+
     const shown = toolEntries.slice(0, TOOLSETS_MAX)
     const overflow = toolEntries.length - TOOLSETS_MAX
 
@@ -402,26 +416,32 @@ export function SessionPanel({ info, sid, t, maxWidth }: SessionPanelProps) {
         )}
 
         {/* ── MCP Servers (collapsed by default) ── */}
-        {info.mcp_servers && info.mcp_servers.length > 0 && (
-          <Box flexDirection="column" marginTop={1}>
-            <CollapseToggle
-              count={info.mcp_servers.length}
-              onToggle={() => setMcpOpen(v => !v)}
-              open={mcpOpen}
-              suffix="connected"
-              t={t}
-              title="MCP Servers"
-            />
-            {mcpOpen && mcpBody()}
-          </Box>
-        )}
+        {(() => {
+          const mcpConnected = (info.mcp_servers ?? []).filter(s => s.connected).length
+          return mcpConnected > 0 && (
+            <Box flexDirection="column" marginTop={1}>
+              <CollapseToggle
+                count={mcpConnected}
+                onToggle={() => setMcpOpen(v => !v)}
+                open={mcpOpen}
+                suffix="connected"
+                t={t}
+                title="MCP Servers"
+              />
+              {mcpOpen && mcpBody()}
+            </Box>
+          )
+        })()}
 
         <Text />
 
         <Text color={t.color.text}>
           {toolsTotal} tools{' · '}
           {skillsTotal} skills
-          {info.mcp_servers?.length ? ` · ${info.mcp_servers.length} MCP` : ''}
+          {(() => {
+            const mcpConnected = (info.mcp_servers ?? []).filter(s => s.connected).length
+            return mcpConnected ? ` · ${mcpConnected} MCP` : ''
+          })()}
           {' · '}
           <Text color={t.color.muted}>/help for commands</Text>
         </Text>
