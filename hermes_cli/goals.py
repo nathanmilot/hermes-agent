@@ -1056,6 +1056,22 @@ _JUDGE_CONFIG_HINT = (
 )
 
 
+def _judge_route() -> Dict[str, str]:
+    """The judge's ACTUAL provider/model from config, so a pause message never names a stale
+    hardcoded example that isn't what the user configured."""
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config() or {}
+        route = (cfg.get("auxiliary") or {}).get("goal_judge") or {}
+        main = cfg.get("model") or {}
+        provider = str(route.get("provider") or main.get("provider") or "auto")
+        model = str(route.get("model") or main.get("default") or "")
+        return {"provider": provider, "model": model}
+    except Exception:
+        return {"provider": "auto", "model": ""}
+
+
 class GoalManager:
     """Per-session goal state + continuation decisions.
 
@@ -1499,7 +1515,7 @@ class GoalManager:
                 f"judge API unreachable {n_tx} turns in a row (check auxiliary.goal_judge provider/key in config.yaml)",
                 "continue", reason,
                 f"⏸ Goal paused — judge API returned errors ({n_tx} turns). Check the goal_judge provider/key in "
-                + _JUDGE_CONFIG_HINT.format(provider="deepseek", model="deepseek-v4-flash"),
+                + _JUDGE_CONFIG_HINT.format(**_judge_route()),
             )
         if n_parse >= DEFAULT_MAX_CONSECUTIVE_PARSE_FAILURES:
             return self._pause_decision(

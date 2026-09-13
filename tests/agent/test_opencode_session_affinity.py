@@ -60,3 +60,18 @@ def test_auxiliary_calls_share_the_main_turn_session_key():
         assert "x-opencode-session" not in (other.get("extra_headers") or {})
     finally:
         aux._RUNTIME_MAIN_CONTEXT.reset(token)
+
+
+def test_out_of_turn_calls_never_drop_the_header(monkeypatch):
+    """The /goal judge runs after the turn facade reset the contextvars; Console Go 400s on a
+    missing header, so an unresolvable scope falls back instead of dropping it."""
+    from agent import opencode_affinity as oa
+
+    monkeypatch.setattr(oa, "_LAST_SESSION_KEY", "")
+    assert oa.opencode_session_headers("opencode-go", "https://opencode.ai/zen/go/v1") == {
+        "x-opencode-session": oa.UNSCOPED_SESSION_KEY,
+    }
+    # Once a turn has resolved the conversation key, out-of-turn calls reuse it.
+    assert oa.opencode_session_headers("opencode-go", None, "sess-1") == {"x-opencode-session": "sess-1"}
+    assert oa.opencode_session_headers("opencode-go", None) == {"x-opencode-session": "sess-1"}
+    assert oa.opencode_session_headers("openrouter", "https://openrouter.ai/api/v1") == {}

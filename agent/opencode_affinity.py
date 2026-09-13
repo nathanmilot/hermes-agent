@@ -20,6 +20,12 @@ from __future__ import annotations
 from typing import Any, Optional
 
 OPENCODE_SESSION_HEADER = "x-opencode-session"
+# Console Go rejects a request with no ``x-opencode-session`` outright (400 ``MissingSessionID``),
+# so the header is never dropped for an OpenCode target. Calls that resolve no conversation scope
+# (see :func:`opencode_session_headers`) reuse the last key this process resolved, then this
+# placeholder — opaque and process-stable, which is all the relay requires.
+UNSCOPED_SESSION_KEY = "hermes-unscoped"
+_LAST_SESSION_KEY: str = ""
 
 
 def is_opencode_target(provider: Optional[str], base_url: Optional[str]) -> bool:
@@ -48,9 +54,17 @@ def opencode_session_headers(
     base_url: Optional[str],
     session_id: Optional[str] = None,
 ) -> dict[str, str]:
-    """Return ``{"x-opencode-session": <key>}`` for OpenCode targets, else ``{}``."""
+    """Return ``{"x-opencode-session": <key>}`` for OpenCode targets, else ``{}``.
+
+    The key is never empty for an OpenCode target: aux calls that run OUTSIDE a turn — the
+    ``/goal`` judge, cron and kanban judges, all of which run after the turn facade has reset the
+    contextvar — resolve no scope and previously sent no header at all, which Console Go rejects
+    with a 400. Those reuse the last key this process resolved, so the call still lands on its
+    conversation's warm backend.
+    """
     if not is_opencode_target(provider, base_url):
         return {}
+    global _LAST_SESSION_KEY
     try:
         from agent.portal_tags import get_affinity_scope, get_conversation_context
         from agent.transports.codex import _cache_scope_from_session_id
@@ -72,7 +86,11 @@ def opencode_session_headers(
         )
     except Exception:
         key = str(session_id or "")
-    return {OPENCODE_SESSION_HEADER: key} if key else {}
+    if key:
+        _LAST_SESSION_KEY = key
+    else:
+        key = _LAST_SESSION_KEY or UNSCOPED_SESSION_KEY
+    return {OPENCODE_SESSION_HEADER: key}
 
 
 def merge_opencode_session_headers(
