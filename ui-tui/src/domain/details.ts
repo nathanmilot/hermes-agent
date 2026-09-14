@@ -65,10 +65,10 @@ export const resolveSections = (raw: unknown): SectionVisibility =>
 //
 // The `commandOverride` flag is set for in-session `/details <mode>` changes.
 // That command should immediately apply to every section, including sections
-// with built-in defaults like thinking/tools=expanded and activity=hidden. On
+// with built-in defaults like thinking=collapsed and tools=expanded. On
 // startup/config sync we keep those defaults layered above the persisted global
-// config so the TUI still opens live reasoning/tools by default unless the user
-// pins explicit per-section overrides.
+// config so the TUI still opens collapsed thinking and live tool rows by
+// default unless the user pins explicit per-section overrides.
 export const sectionMode = (
   name: SectionName,
   global: DetailsMode,

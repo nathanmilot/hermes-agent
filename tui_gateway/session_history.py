@@ -4,6 +4,7 @@ turn tracking and turn-failure detail. Bodies are rebound onto server.py's globa
 from __future__ import annotations
 
 from .method_ctx import bind_module
+from .tool_progress import _redact_tui_verbose_text
 from agent.prompt_builder import STEER_DISPLAY_KIND
 
 
@@ -212,7 +213,17 @@ def _history_to_messages(history: list[dict]) -> list[dict]:
             name = tc_name or m.get("tool_name") or "tool"
             args = tc_args or {}
             # `context` is an 80-char preview; ship args so a full-call renderer isn't truncated.
-            messages.append({"role": "tool", "name": name, "context": _tool_ctx(name, args), **({"args": args} if args else {})})
+            row = {"role": "tool", "name": name, "context": _tool_ctx(name, args), **({"args": args} if args else {})}
+            # Result text rides along (redacted + capped) so a resumed or desktop tool row can be
+            # expanded on demand exactly like a live row (ui-tui ToolTrail per-row toggle) instead of
+            # collapsing to a 72-char note. Full output still lives in the agent context and SQLite.
+            # Empty payloads ({} / [] / null) carry nothing to expand, and a redaction failure (the
+            # helper returns "") drops the text rather than shipping it raw.
+            if content_text.strip() and content_text.strip() not in ("{}", "[]", "null"):
+                tool_text = _redact_tui_verbose_text(content_text)
+                if tool_text:
+                    row["text"] = tool_text
+            messages.append(row)
             continue
         # Assistant detail sidecars can carry the only visible reply or reasoning after resume/reload.
         has_assistant_detail = role == "assistant" and any(m.get(key) for key in _HISTORY_ASSISTANT_DETAIL_KEYS)

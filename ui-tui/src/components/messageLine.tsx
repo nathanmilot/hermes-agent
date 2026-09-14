@@ -68,7 +68,7 @@ export const MessageLine = memo(function MessageLine({
   // sections only — never on the global mode.  A `trail` message feeds Tool
   // calls + Activity; an assistant message with thinking/tools metadata
   // feeds Thinking + Tool calls.  Gating on every section would let
-  // `thinking` (expanded by default) keep an empty wrapper alive when only
+  // `thinking` (collapsed by default) keep an empty wrapper alive when only
   // `tools` is hidden — exactly the empty-Box bug Copilot caught.
   const thinkingMode = sectionMode('thinking', detailsMode, sections, detailsModeCommandOverride)
   const toolsMode = sectionMode('tools', detailsMode, sections, detailsModeCommandOverride)

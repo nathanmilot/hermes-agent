@@ -178,7 +178,7 @@ describe('MessageLine', () => {
     expect(rendered).not.toContain('step two')
   })
 
-  it('keeps live thinking blocks expanded while streaming', () => {
+  it('keeps live thinking blocks collapsed by default while streaming', () => {
     const stdout = new PassThrough()
     const stdin = new PassThrough()
     const stderr = new PassThrough()
@@ -196,6 +196,46 @@ describe('MessageLine', () => {
         cols: 80,
         liveDetails: true,
         msg: { kind: 'trail', role: 'system', text: '', thinking: 'step one\nstep two' },
+        t: DEFAULT_THEME
+      }),
+      {
+        patchConsole: false,
+        stderr: stderr as NodeJS.WriteStream,
+        stdin: stdin as NodeJS.ReadStream,
+        stdout: stdout as NodeJS.WriteStream
+      }
+    )
+
+    instance.unmount()
+    instance.cleanup()
+
+    const rendered = stripAnsi(output)
+
+    // The built-in default collapses reasoning (display.sections.thinking), so a
+    // live block does not force itself open; only an explicit override does.
+    expect(rendered).toContain('Thinking')
+    expect(rendered).not.toContain('step one')
+  })
+
+  it('expands live thinking blocks when the section is pinned expanded', () => {
+    const stdout = new PassThrough()
+    const stdin = new PassThrough()
+    const stderr = new PassThrough()
+    let output = ''
+
+    Object.assign(stdout, { columns: 80, isTTY: false, rows: 24 })
+    Object.assign(stdin, { isTTY: false })
+    Object.assign(stderr, { isTTY: false })
+    stdout.on('data', chunk => {
+      output += chunk.toString()
+    })
+
+    const instance = renderSync(
+      React.createElement(MessageLine, {
+        cols: 80,
+        liveDetails: true,
+        msg: { kind: 'trail', role: 'system', text: '', thinking: 'step one\nstep two' },
+        sections: { thinking: 'expanded' },
         t: DEFAULT_THEME
       }),
       {

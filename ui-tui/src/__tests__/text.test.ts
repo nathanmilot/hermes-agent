@@ -16,6 +16,7 @@ import {
   sameToolTrailGroup,
   sanitizeAnsiForRender,
   splitToolDuration,
+  splitToolTrailRaw,
   stripAnsi,
   thinkingPreview
 } from '../lib/text.js'
@@ -33,7 +34,7 @@ describe('buildToolTrailLine', () => {
     const line = buildToolTrailLine('read_file', 'x', false, '', 0.94)
 
     expect(line).toBe('Read File("x") (0.9s) ✓')
-    expect(parseToolTrailResultLine(line)).toEqual({ call: 'Read File("x") (0.9s)', detail: '', mark: '✓' })
+    expect(parseToolTrailResultLine(line)).toEqual({ call: 'Read File("x") (0.9s)', detail: '', mark: '✓', raw: '' })
     expect(splitToolDuration('Read File("x") (0.9s)')).toEqual({ label: 'Read File("x")', duration: ' (0.9s)' })
   })
 })
@@ -54,7 +55,8 @@ describe('buildVerboseToolTrailLine', () => {
     expect(parseToolTrailResultLine(line)).toEqual({
       call: 'Terminal("npm test") (1.3s)',
       detail: 'Args:\n{\n  "cmd": "npm test"\n}\nResult:\nfirst line\nsecond :: line',
-      mark: '✓'
+      mark: '✓',
+      raw: ''
     })
   })
 
@@ -66,23 +68,37 @@ describe('buildVerboseToolTrailLine', () => {
     expect(parseToolTrailResultLine(line)).toEqual({
       call: 'Terminal("npm test") (0.5s)',
       detail: 'Error:\ncommand failed',
-      mark: '✗'
+      mark: '✗',
+      raw: ''
     })
   })
 
-  it('caps a large result to a small persisted preview (#34095)', () => {
-    // A 40KB browser-snapshot-sized result must NOT be embedded whole — the
-    // persisted, expanded-by-default trail block is what blew up the Ink
-    // render tree and silently OOM-killed the TUI. The block stays small.
+  it('caps a large result to a small inline preview plus a bounded retained block (#34095)', () => {
+    // A 40KB browser-snapshot-sized result must NOT be embedded whole. The row
+    // renders `visible` while collapsed (small); the block the user can expand is
+    // capped at the live-render budget.
     const huge = 'A'.repeat(40_000)
     const line = buildVerboseToolTrailLine('browser_snapshot', 'https://x.example', false, 2, undefined, huge)
+    const { raw, visible } = splitToolTrailRaw(line)
 
-    expect(line).toContain('Result:\n')
-    // Far below the old 16KB live-render budget; the whole line (call + label +
-    // omitted marker + preview) must stay on the order of ~1KB, not ~40KB.
-    expect(line.length).toBeLessThan(2_000)
-    expect(line).toContain('omitted')
-    expect(line.endsWith(' ✓')).toBe(true)
+    expect(visible).toContain('Result:\n')
+    expect(visible).toContain('omitted')
+    expect(visible.endsWith(' ✓')).toBe(true)
+    expect(visible.length).toBeLessThan(2_000)
+    expect(isToolTrailResultLine(line)).toBe(true)
+    expect(parseToolTrailResultLine(line)?.raw).toBe(raw)
+
+    expect(raw.length).toBeGreaterThan(1_000)
+    expect(raw.length).toBeLessThan(20_000)
+  })
+
+  it('keeps the retained block out of what line consumers compare', () => {
+    const line = buildVerboseToolTrailLine('browser_snapshot', 'x', false, 1, undefined, 'A'.repeat(4_000))
+
+    expect(splitToolTrailRaw(line).raw).not.toBe('')
+    expect(sameToolTrailGroup('Browser Snapshot', line)).toBe(true)
+    expect(isToolTrailResultLine(line)).toBe(true)
+    expect(lastCotTrailIndex([line])).toBe(-1)
   })
 
   it('does not truncate a result that already fits the preview budget', () => {
@@ -91,6 +107,9 @@ describe('buildVerboseToolTrailLine', () => {
 
     expect(line).toContain(`Result:\n${small}`)
     expect(line).not.toContain('omitted')
+    // Nothing beyond the preview to retain, so no block rides along.
+    expect(line).not.toContain('\u0000')
+    expect(splitToolTrailRaw(line).raw).toBe('')
   })
 })
 

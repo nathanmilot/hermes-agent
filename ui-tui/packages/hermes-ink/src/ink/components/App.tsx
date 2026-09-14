@@ -1,3 +1,4 @@
+import { appendFileSync } from 'node:fs'
 import { PureComponent, type ReactNode } from 'react'
 
 import { updateLastInteractionTime } from '../../bootstrap/state.js'
@@ -549,7 +550,23 @@ export default class App extends PureComponent<Props, State> {
     // This batches all state updates from handleInput and all useInput
     // listeners together within one high-priority update context.
     if (keys.length > 0) {
+      const diagT0 = STDIN_DIAG_ENABLED ? Date.now() : 0
+
       reconciler.discreteUpdates(processKeysInBatch, this, keys, undefined, undefined)
+
+      if (STDIN_DIAG_ENABLED) {
+        let pasted = 0
+        let maxSeq = 0
+
+        for (const k of keys) {
+          if (k.kind === 'key' && k.isPasted) pasted += 1
+          maxSeq = Math.max(maxSeq, k.sequence?.length ?? 0)
+        }
+
+        stdinDiag(
+          `batch keys=${keys.length} pasted=${pasted} maxSeq=${maxSeq} took=${Date.now() - diagT0}ms`
+        )
+      }
     }
 
     // If we have incomplete escape sequences or an unterminated paste, set a
@@ -582,10 +599,26 @@ export default class App extends PureComponent<Props, State> {
 
     try {
       let chunk
+      let diagChunks = 0
+      let diagChars = 0
 
       while ((chunk = this.props.stdin.read() as string | null) !== null) {
+        if (STDIN_DIAG_ENABLED) {
+          const delta = stdinDiagLastChunkAt ? Date.now() - stdinDiagLastChunkAt : 0
+          stdinDiagLastChunkAt = Date.now()
+          diagChunks += 1
+          diagChars += chunk.length
+          stdinDiag(
+            `chunk#${diagChunks} ${stdinDiagPreview(chunk)} backlog=${this.props.stdin.readableLength} gap=${delta}ms`
+          )
+        }
+
         // Process the input chunk
         this.processInput(chunk)
+      }
+
+      if (STDIN_DIAG_ENABLED && diagChunks > 1) {
+        stdinDiag(`readable-event chunks=${diagChunks} chars=${diagChars}`)
       }
     } catch (error) {
       // In Bun, an uncaught throw inside a stream 'readable' handler can
@@ -691,6 +724,41 @@ export default class App extends PureComponent<Props, State> {
 
 // Helper to process all keys within a single discrete update context.
 // discreteUpdates expects (fn, a, b, c, d) -> fn(a, b, c, d)
+// TEMP stdin diagnostics: HERMES_TUI_STDIN_DIAG=1 records raw stdin chunk sizes,
+// arrival gaps, remaining stdin backlog, and the cost of the parse+emit batch, so
+// a remote-desktop input flood can be measured instead of guessed at. Both the
+// env check and the write are best-effort: diagnostics must never affect input.
+const STDIN_DIAG_ENABLED = process.env.HERMES_TUI_STDIN_DIAG === '1'
+const STDIN_DIAG_FILE =
+  process.env.HERMES_TUI_STDIN_DIAG_FILE ?? '/tmp/hermes-stdin-diag.log'
+
+function stdinDiag(line: string): void {
+  if (!STDIN_DIAG_ENABLED) return
+  try {
+    appendFileSync(STDIN_DIAG_FILE, `${Date.now()} ${line}\n`)
+  } catch {
+    // never let diagnostics break input
+  }
+}
+
+let stdinDiagLastChunkAt = 0
+
+function stdinDiagPreview(s: string, limit = 80): string {
+  const slice = s.slice(0, limit)
+  const ascii = [...slice]
+    .map(c => {
+      const n = c.charCodeAt(0)
+      return n >= 32 && n < 127 ? c : '.'
+    })
+    .join('')
+  const hex = [...slice].map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(' ')
+  return `len=${s.length} ascii=[${ascii}]${s.length > limit ? ' (truncated)' : ''} hex=[${hex}]`
+}
+
+if (STDIN_DIAG_ENABLED) {
+  stdinDiag(`--- session start pid=${process.pid} file=${STDIN_DIAG_FILE} ---`)
+}
+
 function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined, _unused2: undefined): void {
   // Update interaction time for notification timeout tracking.
   // This is called from the central input handler to avoid having multiple

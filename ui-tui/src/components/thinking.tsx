@@ -92,6 +92,7 @@ function TreeTextRow({
   color,
   content,
   dimColor,
+  onClick,
   rails = [],
   t,
   wrap = 'wrap-trim'
@@ -100,6 +101,7 @@ function TreeTextRow({
   color: string
   content: ReactNode
   dimColor?: boolean
+  onClick?: () => void
   rails?: TreeRails
   t: Theme
   wrap?: 'truncate-end' | 'wrap' | 'wrap-trim'
@@ -116,7 +118,13 @@ function TreeTextRow({
 
   return (
     <TreeRow branch={branch} rails={rails} t={t}>
-      {text}
+      {onClick ? (
+        <Box flexDirection="column" onClick={onClick}>
+          {text}
+        </Box>
+      ) : (
+        text
+      )}
     </TreeRow>
   )
 }
@@ -680,6 +688,10 @@ interface Group {
   details: DetailRow[]
   key: string
   label: string
+  // Untruncated Args/Result block for this row, when the gateway shipped one and
+  // it exceeds the inline preview (see lib/text.ts::splitToolTrailRaw). A row
+  // that has one collapses to a one-line summary and opens on click.
+  raw?: string
 }
 
 export const ToolTrail = memo(function ToolTrail({
@@ -755,6 +767,13 @@ export const ToolTrail = memo(function ToolTrail({
   const [deepSubagents, setDeepSubagents] = useState(visible.subagents === 'expanded')
   const [openMeta, setOpenMeta] = useState(visible.activity === 'expanded')
 
+  // Tool rows that carry an untruncated Args/Result block open on click and close
+  // the same way, one row at a time — same affordance as the section chevrons.
+  // Keyed by the group key (trail index / tool id) so the state survives a
+  // re-render; NOT reset by the details-mode resync, so a manual open sticks.
+  const [openRows, setOpenRows] = useState<Record<string, boolean>>({})
+  const toggleRow = (key: string) => setOpenRows(rows => ({ ...rows, [key]: !rows[key] }))
+
   useEffect(() => {
     if (!tools.length || (visible.tools !== 'expanded' && !openTools)) {
       return
@@ -787,7 +806,7 @@ export const ToolTrail = memo(function ToolTrail({
   }, [thinkingDefaultExpanded, visible])
 
   // `collapsed` is fully manual: the panel opens only on a chevron click and
-// never self-expands while reasoning is live.
+  // never self-expands while reasoning is live.
 
   const cot = useMemo(() => thinkingPreview(reasoning, 'full', THINKING_COT_MAX), [reasoning])
 
@@ -829,7 +848,8 @@ export const ToolTrail = memo(function ToolTrail({
         content: parsed.call,
         details: [],
         key: `tr-${i}`,
-        label: parsed.call
+        label: parsed.call,
+        raw: parsed.raw || undefined
       })
 
       if (parsed.detail) {
@@ -880,16 +900,18 @@ export const ToolTrail = memo(function ToolTrail({
 
   for (const tool of tools) {
     const label = formatToolCall(tool.name, tool.context || '')
+    const argsBlock = tool.verboseArgs ? `Args:\n${boundedLiveRenderText(tool.verboseArgs)}` : ''
 
     groups.push({
       color: t.color.text,
       key: tool.id,
       label,
-      details: tool.verboseArgs
+      raw: argsBlock || undefined,
+      details: argsBlock
         ? [
             {
               color: t.color.muted,
-              content: `Args:\n${boundedLiveRenderText(tool.verboseArgs)}`,
+              content: argsBlock,
               dimColor: true,
               key: `${tool.id}-args`
             }
@@ -1107,6 +1129,23 @@ export const ToolTrail = memo(function ToolTrail({
             // while it's still in-flight and before any subagent has
             // registered — so users can open the live monitor immediately.
             const isDelegateGroup = group.label.startsWith('Delegate Task')
+            // Two layers. The section header lists one concatenated line per tool
+            // (call + a compacted result); each of those rows then toggles its own
+            // full Args/Result block. `chrome` rows carry non-string content (the
+            // live "analyzing tool output…" spinner) and stay visible either way.
+            const infoRows = group.details.filter(detail => typeof detail.content === 'string')
+            const chromeRows = group.details.filter(detail => typeof detail.content !== 'string')
+            const info = group.raw ?? infoRows.map(detail => String(detail.content)).join('\n')
+            const expandable = info.length > 0
+            const rowOpen = Boolean(openRows[group.key])
+
+            const expandedRows = rowOpen
+              ? group.raw
+                ? [{ color: t.color.muted, content: group.raw, dimColor: true, key: `${group.key}-block` }]
+                : infoRows
+              : []
+
+            const visibleRows = [...expandedRows, ...chromeRows]
 
             return (
               <Box flexDirection="column" key={group.key}>
@@ -1115,6 +1154,7 @@ export const ToolTrail = memo(function ToolTrail({
                   color={group.color}
                   content={
                     <>
+                      {expandable ? <Text color={t.color.accent}>{rowOpen ? '▾ ' : '▸ '}</Text> : null}
                       <Text color={t.color.tool}>● </Text>
                       {toolLabel(group)}
                       {isDelegateGroup ? (
@@ -1122,15 +1162,21 @@ export const ToolTrail = memo(function ToolTrail({
                           {'  (/agents to monitor)'}
                         </Text>
                       ) : null}
+                      {expandable && !rowOpen ? (
+                        <Text color={t.color.muted} dim>
+                          {`  ${compactPreview(info, 72)}`}
+                        </Text>
+                      ) : null}
                     </>
                   }
+                  onClick={expandable ? () => toggleRow(group.key) : undefined}
                   rails={rails}
                   t={t}
                 />
-                {group.details.map((detail, detailIndex) => (
+                {visibleRows.map((detail, detailIndex) => (
                   <Detail
                     {...detail}
-                    branch={detailIndex === group.details.length - 1 && !hasInlineSubagents ? 'last' : 'mid'}
+                    branch={detailIndex === visibleRows.length - 1 && !hasInlineSubagents ? 'last' : 'mid'}
                     key={detail.key}
                     rails={childRails}
                     t={t}

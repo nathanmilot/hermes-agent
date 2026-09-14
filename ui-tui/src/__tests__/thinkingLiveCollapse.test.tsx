@@ -5,7 +5,7 @@ import React from 'react'
 import { describe, expect, it } from 'vitest'
 
 import { ToolTrail } from '../components/thinking.js'
-import { stripAnsi } from '../lib/text.js'
+import { buildToolTrailLine, buildVerboseToolTrailLine, stripAnsi } from '../lib/text.js'
 import { DEFAULT_THEME } from '../theme.js'
 
 const flushEffects = async () => {
@@ -92,6 +92,103 @@ describe('ToolTrail — collapsed mode stays manual while reasoning is live', ()
     // `expanded` is a manual preference: reasoningActive=false must NOT
     // force it closed.
     expect(finalChevronOpen()).toBe(true)
+
+    instance.unmount()
+    instance.cleanup()
+  })
+})
+
+describe('ToolTrail — a tool row keeps its output until the row is opened', () => {
+  const mountToolRow = (resultText: string, cols = 60) => {
+    const stdout = new PassThrough()
+    const stdin = new PassThrough()
+    const stderr = new PassThrough()
+    let output = ''
+
+    Object.assign(stdout, { columns: cols, isTTY: false, rows: 20 })
+    Object.assign(stdin, { isTTY: false })
+    Object.assign(stderr, { isTTY: false })
+    stdout.on('data', chunk => {
+      output += chunk.toString()
+    })
+
+    const line = buildVerboseToolTrailLine('terminal', 'npm test', false, 1.2, undefined, resultText)
+
+    const instance = renderSync(<ToolTrail sections={{ tools: 'expanded' }} t={DEFAULT_THEME} trail={[line]} />, {
+      patchConsole: false,
+      stderr: stderr as NodeJS.WriteStream,
+      stdin: stdin as NodeJS.ReadStream,
+      stdout: stdout as NodeJS.WriteStream
+    })
+
+    return { instance, rendered: () => stripAnsi(output) }
+  }
+
+  it('summarises the row and marks it expandable instead of rendering the whole block', async () => {
+    const { instance, rendered } = mountToolRow(`${'A'.repeat(4_000)}TAIL-MARKER`)
+
+    await flushEffects()
+
+    const out = rendered()
+
+    expect(out).toContain('Terminal("npm test")')
+    expect(out).toContain('▸ ')
+    // Layer 1 shows the concatenated line; the retained block is layer 2 and stays
+    // out of the render tree until the user opens that row.
+    expect(out).not.toContain('TAIL-MARKER')
+
+    instance.unmount()
+    instance.cleanup()
+  })
+
+  it('gives an output that already fits the preview the same toggle', async () => {
+    // A wide terminal so the compacted result stays on the row's single line.
+    const { instance, rendered } = mountToolRow('ok: 3 files changed', 200)
+
+    await flushEffects()
+
+    const out = rendered()
+
+    expect(out).toContain('▸ ')
+    expect(out).toContain('ok: 3 files changed')
+
+    instance.unmount()
+    instance.cleanup()
+  })
+
+  it('leaves a row with nothing to show as a bare single line', async () => {
+    const stdout = new PassThrough()
+    const stdin = new PassThrough()
+    const stderr = new PassThrough()
+    let output = ''
+
+    Object.assign(stdout, { columns: 60, isTTY: false, rows: 20 })
+    Object.assign(stdin, { isTTY: false })
+    Object.assign(stderr, { isTTY: false })
+    stdout.on('data', chunk => {
+      output += chunk.toString()
+    })
+
+    const instance = renderSync(
+      <ToolTrail
+        sections={{ tools: 'expanded' }}
+        t={DEFAULT_THEME}
+        trail={[buildToolTrailLine('terminal', 'pwd', false, '', 0.3)]}
+      />,
+      {
+        patchConsole: false,
+        stderr: stderr as NodeJS.WriteStream,
+        stdin: stdin as NodeJS.ReadStream,
+        stdout: stdout as NodeJS.WriteStream
+      }
+    )
+
+    await flushEffects()
+
+    const out = stripAnsi(output)
+
+    expect(out).toContain('Terminal("pwd")')
+    expect(out).not.toContain('▸ ')
 
     instance.unmount()
     instance.cleanup()

@@ -224,19 +224,33 @@ export const buildToolTrailLine = (
   return `${formatToolCall(name, context)}${took}${detail ? ` :: ${detail}` : ''} ${error ? '✗' : '✓'}`
 }
 
-const verboseToolBlock = (label: string, text?: string) => {
+const verboseToolBlock = (label: string, text: string | undefined, maxChars: number, maxLines: number) => {
   const body = (text ?? '').trim()
 
-  // Persisted trail blocks are kept all session and rendered expanded by
-  // default — cap to a small readable preview (NOT the 16KB live-render
-  // budget) so a large tool output can't balloon the Ink render tree and
-  // silently OOM-kill the TUI. See VERBOSE_TRAIL_MAX_CHARS (#34095).
-  return body
-    ? `${label}:\n${boundedLiveRenderText(body, {
-        maxChars: VERBOSE_TRAIL_MAX_CHARS,
-        maxLines: VERBOSE_TRAIL_MAX_LINES
-      })}`
-    : ''
+  return body ? `${label}:\n${boundedLiveRenderText(body, { maxChars, maxLines })}` : ''
+}
+
+// The collapsed trail row carries only the small persisted preview
+// (VERBOSE_TRAIL_MAX_CHARS); the row instead shows a one-line summary and keeps
+// the untruncated block for the row the user expands. The block rides INSIDE the
+// trail string after a NUL sentinel so every existing consumer can keep passing
+// lines around as opaque strings (slicing, dedupe, height hashing) and only the
+// row renderer takes it apart — see splitToolTrailRaw.
+const RAW_SEP = '\u0000'
+
+const attachToolTrailRaw = (visible: string, raw: string) =>
+  raw ? `${visible.slice(0, -2)}${RAW_SEP}${raw}${RAW_SEP} ${visible.slice(-1)}` : visible
+
+export const splitToolTrailRaw = (line: string): { raw: string; visible: string } => {
+  const start = line.indexOf(RAW_SEP)
+
+  if (start < 0) {
+    return { raw: '', visible: line }
+  }
+
+  const end = line.lastIndexOf(RAW_SEP)
+
+  return { raw: line.slice(start + 1, end), visible: `${line.slice(0, start)}${line.slice(end + 1)}` }
 }
 
 export const buildVerboseToolTrailLine = (
@@ -247,37 +261,51 @@ export const buildVerboseToolTrailLine = (
   argsText?: string,
   resultText?: string
 ) => {
-  const detail = [verboseToolBlock('Args', argsText), verboseToolBlock(error ? 'Error' : 'Result', resultText)]
-    .filter(Boolean)
-    .join('\n')
+  const block = (maxChars: number, maxLines: number) =>
+    [
+      verboseToolBlock('Args', argsText, maxChars, maxLines),
+      verboseToolBlock(error ? 'Error' : 'Result', resultText, maxChars, maxLines)
+    ]
+      .filter(Boolean)
+      .join('\n')
 
+  const detail = block(VERBOSE_TRAIL_MAX_CHARS, VERBOSE_TRAIL_MAX_LINES)
   const took = duration !== undefined ? ` (${duration.toFixed(1)}s)` : ''
+  const visible = `${formatToolCall(name, context)}${took}${detail ? ` :: ${detail}` : ''} ${error ? '✗' : '✓'}`
+  const raw = block(LIVE_RENDER_MAX_CHARS, LIVE_RENDER_MAX_LINES)
 
-  return `${formatToolCall(name, context)}${took}${detail ? ` :: ${detail}` : ''} ${error ? '✗' : '✓'}`
+  // Short outputs are already inside the preview, so don't retain a second copy.
+  return attachToolTrailRaw(visible, raw.length > detail.length ? raw : '')
 }
 
-export const isToolTrailResultLine = (line: string) => line.endsWith(' ✓') || line.endsWith(' ✗')
+export const isToolTrailResultLine = (line: string) => {
+  const { visible } = splitToolTrailRaw(line)
+
+  return visible.endsWith(' ✓') || visible.endsWith(' ✗')
+}
 
 export const parseToolTrailResultLine = (line: string) => {
-  if (!isToolTrailResultLine(line)) {
+  const { raw, visible } = splitToolTrailRaw(line)
+
+  if (!visible.endsWith(' ✓') && !visible.endsWith(' ✗')) {
     return null
   }
 
-  const mark = line.endsWith(' ✗') ? '✗' : '✓'
-  const body = line.slice(0, -2)
+  const mark = visible.endsWith(' ✗') ? '✗' : '✓'
+  const body = visible.slice(0, -2)
   const sep = body.indexOf(' :: ')
 
   if (sep >= 0) {
-    return { call: body.slice(0, sep), detail: body.slice(sep + 4), mark }
+    return { call: body.slice(0, sep), detail: body.slice(sep + 4), mark, raw }
   }
 
   const legacy = body.indexOf(': ')
 
   if (legacy > 0) {
-    return { call: body.slice(0, legacy), detail: body.slice(legacy + 2), mark }
+    return { call: body.slice(0, legacy), detail: body.slice(legacy + 2), mark, raw }
   }
 
-  return { call: body, detail: '', mark }
+  return { call: body, detail: '', mark, raw }
 }
 
 export const splitToolDuration = (call: string) => {
@@ -288,12 +316,20 @@ export const splitToolDuration = (call: string) => {
 
 export const isTransientTrailLine = (line: string) => line.startsWith('drafting ') || line === 'analyzing tool output…'
 
-export const sameToolTrailGroup = (label: string, entry: string) =>
-  entry === `${label} ✓` ||
-  entry === `${label} ✗` ||
-  entry.startsWith(`${label}(`) ||
-  entry.startsWith(`${label} ::`) ||
-  entry.startsWith(`${label}:`)
+// `entry` is a trail line, so strip the retained Args/Result block before the
+// prefix checks — otherwise a row that carries one would look like a different
+// tool and survive the duplicate sweep in TurnController.completeTool.
+export const sameToolTrailGroup = (label: string, entry: string) => {
+  const { visible } = splitToolTrailRaw(entry)
+
+  return (
+    visible === `${label} ✓` ||
+    visible === `${label} ✗` ||
+    visible.startsWith(`${label}(`) ||
+    visible.startsWith(`${label} ::`) ||
+    visible.startsWith(`${label}:`)
+  )
+}
 
 export const lastCotTrailIndex = (trail: readonly string[]) => {
   for (let i = trail.length - 1; i >= 0; i--) {

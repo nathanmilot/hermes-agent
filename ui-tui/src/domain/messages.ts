@@ -1,5 +1,5 @@
 import { LONG_MSG } from '../config/limits.js'
-import { buildToolTrailLine } from '../lib/text.js'
+import { buildVerboseToolTrailLine } from '../lib/text.js'
 import type { Msg, SessionInfo } from '../types.js'
 
 export const introMsg = (info: SessionInfo): Msg => ({ info, kind: 'intro', role: 'system', text: '' })
@@ -35,7 +35,13 @@ export const toTranscriptMessages = (rows: unknown): Msg[] => {
       typeof timestamp === 'number' && Number.isFinite(timestamp) && timestamp > 0 ? timestamp : undefined
 
     if (role === 'tool') {
-      pending.push(buildToolTrailLine(name ?? 'tool', context ?? ''))
+      // The gateway ships the (redacted, capped) result text on the row, so a
+      // resumed tool row carries the same expandable block a live row does
+      // instead of collapsing to a 72-char note. See ToolTrail's per-row toggle.
+      const resultText = typeof text === 'string' && text.trim() ? text : undefined
+      const argsText = row.args ? JSON.stringify(row.args, null, 2) : undefined
+
+      pending.push(buildVerboseToolTrailLine(name ?? 'tool', context ?? '', false, undefined, argsText, resultText))
 
       continue
     }
@@ -112,6 +118,7 @@ export const fmtDuration = (ms: number) => {
 }
 
 interface TranscriptRow {
+  args?: Record<string, unknown>
   context?: string
   display_kind?: string
   display_metadata?: { task_count?: number; [key: string]: unknown }

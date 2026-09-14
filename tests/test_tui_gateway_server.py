@@ -1552,17 +1552,23 @@ def test_tui_verbose_tool_details_are_capped_before_emit(monkeypatch):
     assert "one" not in capped
 
 
-def test_tui_verbose_default_cap_stays_small(monkeypatch):
-    # Regression guard for #34095: the verbose tool text shipped to the TUI is
-    # rendered into a persisted, expanded-by-default trail block for the whole
-    # session. Raising this cap back toward the old 16KB re-introduces the Ink
-    # render-tree blowup that silently OOM-killed the TUI. Keep it small.
-    assert server._TUI_VERBOSE_TEXT_MAX_CHARS <= 2_000
+def test_tui_verbose_default_cap_stays_within_the_tui_render_budget():
+    # Regression guard for #34095: the verbose tool text shipped to the TUI used to
+    # be rendered into a persisted, expanded-by-default trail block for the whole
+    # session, so the cap had to stay tiny. The TUI now renders the block only for
+    # the row the user expanded (one at a time, everything else a one-line
+    # summary), so the cap only has to stay inside the budget the streaming tail
+    # already renders — ui-tui LIVE_RENDER_MAX_CHARS / _LINES. Raising it past
+    # that re-introduces the Ink render-tree blowup.
+    assert server._TUI_VERBOSE_TEXT_MAX_CHARS <= 16_000
+    assert server._TUI_VERBOSE_TEXT_MAX_LINES <= 240
 
     huge = "x" * 40_000
     capped = server._cap_tui_verbose_text(huge)
 
-    assert len(capped) < 2_000
+    # Size of the retained block plus the "[showing verbose tail; omitted …]" label.
+    assert len(capped) <= server._TUI_VERBOSE_TEXT_MAX_CHARS + 64
+    assert len(capped) < 17_000
     assert capped.startswith("[showing verbose tail; omitted ")
 
 
@@ -1592,6 +1598,37 @@ def test_tui_verbose_tool_events_omit_details_when_redaction_fails(monkeypatch):
     assert events[1][0] == "tool.complete"
     assert "args_text" not in events[0][2]
     assert "result_text" not in events[1][2]
+
+
+def test_tui_tool_progress_all_mode_ships_expandable_tool_text(monkeypatch):
+    # `tool_progress: all` (the default) has to ship the capped Args/Result text:
+    # the TUI row renders a one-line summary and expands to that text on click, so
+    # without it the row has nothing to show. `off` still ships nothing.
+    events: list[tuple[str, str, dict]] = []
+    monkeypatch.setattr(
+        server, "_emit", lambda event_type, sid, payload: events.append((event_type, sid, payload))
+    )
+    monkeypatch.setitem(
+        server._sessions, "all-mode-test", {"tool_progress_mode": "all", "tool_started_at": {}}
+    )
+
+    server._on_tool_start("all-mode-test", "tool-1", "terminal", {"command": "pwd"})
+    server._on_tool_complete("all-mode-test", "tool-1", "terminal", {"command": "pwd"}, "done")
+
+    assert events[0][0] == "tool.start"
+    assert "pwd" in events[0][2]["args_text"]
+    assert events[1][0] == "tool.complete"
+    assert "done" in events[1][2]["result_text"]
+
+    events.clear()
+    monkeypatch.setitem(
+        server._sessions, "off-mode-test", {"tool_progress_mode": "off", "tool_started_at": {}}
+    )
+
+    server._on_tool_start("off-mode-test", "tool-2", "terminal", {"command": "pwd"})
+    server._on_tool_complete("off-mode-test", "tool-2", "terminal", {"command": "pwd"}, "done")
+
+    assert events == []
 
 
 def test_tui_tool_output_risk_event_exposes_metadata_without_raw_output(monkeypatch):
@@ -2747,6 +2784,43 @@ def test_history_to_messages_preserves_tool_calls_for_resume_display():
         {"role": "assistant", "text": "first answer"},
         {"role": "user", "text": "second prompt"},
     ]
+
+
+def test_history_to_messages_ships_tool_result_text_for_on_demand_expansion():
+    # A resumed tool row must carry the result text (redacted + capped) so the TUI
+    # can expand that row on click instead of showing a 72-char note forever.
+    history = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call_1", "function": {"name": "terminal", "arguments": json.dumps({"command": "ls"})}},
+            ],
+        },
+        {"role": "tool", "content": "file-a\nfile-b", "tool_call_id": "call_1"},
+        {"role": "assistant", "content": "done"},
+    ]
+
+    rows = server._history_to_messages(history)
+    assert rows[0]["text"] == "file-a\nfile-b"
+
+    huge = "x" * 40_000
+    capped = server._history_to_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call_1", "function": {"name": "terminal", "arguments": json.dumps({"command": "ls"})}},
+                ],
+            },
+            {"role": "tool", "content": huge, "tool_call_id": "call_1"},
+            {"role": "assistant", "content": "done"},
+        ]
+    )[0]["text"]
+
+    assert capped.startswith("[showing verbose tail; omitted ")
+    assert len(capped) < 17_000
 
 
 def test_history_to_messages_drops_pure_compaction_scaffolding():
@@ -10648,7 +10722,37 @@ def test_session_compress_normalizes_messages_for_desktop_transcript(monkeypatch
         server._sessions.pop("sid", None)
 
     assert response["result"]["messages"] == server._history_to_messages(history)
-    assert "very sensitive tool output" not in str(response["result"]["messages"])
+    # A transcript tool row now carries the result text (redacted + capped) so the
+    # TUI/desktop can expand that row on demand instead of collapsing to a 72-char
+    # note. Unredacted output is still never shipped — see the failure-path test.
+    tool_row = next(m for m in response["result"]["messages"] if m["role"] == "tool")
+    assert tool_row["text"] == "very sensitive tool output"
+
+
+def test_history_to_messages_drops_tool_result_text_when_redaction_fails(monkeypatch):
+    redact_module = types.ModuleType("agent.redact")
+
+    def fail_redaction(*_args, **_kwargs):
+        raise RuntimeError("redaction unavailable")
+
+    setattr(redact_module, "redact_sensitive_text", fail_redaction)
+    monkeypatch.setitem(sys.modules, "agent.redact", redact_module)
+
+    history = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call-1", "function": {"name": "read_file", "arguments": '{"path":"secret.txt"}'}}
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "content": "very sensitive tool output"},
+    ]
+
+    rows = server._history_to_messages(history)
+
+    assert rows[0]["role"] == "tool"
+    assert "text" not in rows[0]
 
 
 def test_session_compress_returns_compute_host_history(monkeypatch):

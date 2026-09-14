@@ -8,12 +8,13 @@ from .method_ctx import bind_module
 # Verbose tool text is capped to the Ink render budget (a hair more, so the "[omitted …]" label
 # stays informative): unbounded output fed a render-tree blowup that OOM-killed the TUI parent.
 # Full output stays in the agent context and the SQLite session, untouched.
-# Tool Args/Result text shipped to the TUI for the verbose trail line. The TUI renders only a small
-# persisted preview (ui-tui VERBOSE_TRAIL_MAX_CHARS), kept all session and expanded by default — so shipping
-# more than that is pure pipe waste AND feeds the Ink render-tree blowup that silently OOM-killed the TUI
-# parent (#34095).
-_TUI_VERBOSE_TEXT_MAX_CHARS = 1_000
-_TUI_VERBOSE_TEXT_MAX_LINES = 16
+# Tool Args/Result text shipped to the TUI for the trail row. The TUI keeps a one-line preview on
+# the row and carries the untruncated block alongside it, rendered ONLY for the row the user
+# expands — so the Ink render-tree blowup that silently OOM-killed the TUI parent (#34095) stays
+# bounded to that single row. The cap therefore matches the TUI's live-render budget
+# (ui-tui LIVE_RENDER_MAX_CHARS / _LINES): the same size the streaming tail already renders.
+_TUI_VERBOSE_TEXT_MAX_CHARS = 16_000
+_TUI_VERBOSE_TEXT_MAX_LINES = 240
 
 _TODO_TOOL_NAMES = ("todo_list", "todo")  # legacy alias: pre-rename replays
 
@@ -203,7 +204,7 @@ def _on_tool_start(sid: str, tool_call_id: str, name: str, args: dict):
         # while the tool runs. args.todos may be a partial merge — tool.complete is the truth.
         if args:
             payload["args"] = args
-        if _session_verbose(sid) and (args_text := _tool_args_text(args)):
+        if _tool_progress_enabled(sid) and (args_text := _tool_args_text(args)):
             payload["args_text"] = args_text
         _emit("tool.start", sid, payload)
 
@@ -223,7 +224,7 @@ def _on_tool_complete(sid: str, tool_call_id: str, name: str, args: dict, result
     summary = _tool_summary(name, result, duration_s)
     if summary:
         payload["summary"] = summary
-    if _session_verbose(sid) and (result_text := _tool_result_text(result)):
+    if _tool_progress_enabled(sid) and (result_text := _tool_result_text(result)):
         payload["result_text"] = result_text
     todo_state = _normalize_todo_state(payload.get("result")) if name in _TODO_TOOL_NAMES else None
     if todo_state is not None:
