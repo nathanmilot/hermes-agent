@@ -56,6 +56,9 @@ import pytest
     ("deepseek/deepseek-v4-flash", 600.0),
     ("deepseek/deepseek-v4-pro", 600.0),
     ("deepseek-v4-flash-free", 600.0),   # catalog -free variant inherits via separator anchor
+    # OpenCode Go/Zen short id for the V4.1 flash build (renamed SKU, not an alias).
+    ("deepseek-flash", 600.0),
+    ("deepseek-flash-vision-exp", 600.0),
     # Qwen QwQ + Qwen3 thinking variants (qwen3 family entry matches all).
     ("qwen/qwq-32b-preview", 300.0),
     ("qwen/qwen3-235b-a22b-thinking", 180.0),

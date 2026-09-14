@@ -156,3 +156,28 @@ WantedBy=default.target
         unit_file = tmp_path / "nonexistent.service"
         monkeypatch.setattr(gw, "get_systemd_unit_path", lambda system=False: unit_file)
         assert gw.systemd_unit_is_current(system=False) is False
+
+    def test_unit_differing_only_in_generated_path_is_current(self, tmp_path, monkeypatch):
+        """PATH is captured from the invoking shell (WSL interop appends every Windows path), so a
+        correct unit must not be flagged outdated on every status/restart."""
+        from hermes_cli import gateway as gw
+
+        unit_file = tmp_path / "hermes-gateway.service"
+        unit_file.write_text(
+            '[Service]\n'
+            'Environment="PATH=/home/alice/.local/bin:/usr/bin:/bin"\n'
+            'Restart=always\n'
+        )
+        monkeypatch.setattr(gw, "get_systemd_unit_path", lambda system=False: unit_file)
+        monkeypatch.setattr(
+            gw,
+            "generate_systemd_unit",
+            lambda system=False, run_as_user=None: (
+                '[Service]\n'
+                'Environment="PATH=/mnt/c/Program Files/Rio/:/usr/bin:/bin"\n'
+                'Restart=always\n'
+            ),
+        )
+
+        assert gw.systemd_unit_is_current(system=False) is True
+

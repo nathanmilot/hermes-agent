@@ -2013,6 +2013,18 @@ def _iteration_summary_api_messages(agent, messages: list) -> list:
 
 def _managed_summary_call(agent, api_request_id: str, request, callback, *, retry_count: int):
     from agent import relay_llm
+    from agent.opencode_affinity import merge_opencode_session_headers
+
+    # The chat and anthropic summary builders hand-build their request instead of routing
+    # through build_api_kwargs(), so nothing attached the OpenCode affinity header and Console
+    # Go answered 400 MissingSessionID — the summary never landed. Merge here so every summary
+    # attempt on every transport carries it (codex already inherits it via build_api_kwargs).
+    merge_opencode_session_headers(
+        request,
+        getattr(agent, "provider", None),
+        getattr(agent, "base_url", None),
+        getattr(agent, "session_id", None),
+    )
     return relay_llm.execute_current(
         request, callback,
         name=str(getattr(agent, "provider", "") or "provider"), model_name=str(getattr(agent, "model", "") or ""),

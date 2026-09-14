@@ -1097,34 +1097,49 @@ def _systemctl_show(properties: tuple[str, ...], *, system: bool) -> dict[str, s
 
 def _hermes_home_from_systemd_unit_file(system: bool = False) -> str | None:
     """``HERMES_HOME`` from the on-disk unit file — what refresh/compare already read, and reliable under ``sudo``."""
-    unit_path = get_systemd_unit_path(system=system)
+    return _unit_env_from_file(get_systemd_unit_path(system=system), "HERMES_HOME")
+
+
+def _unit_env_from_file(unit_path: Path, key: str) -> str | None:
+    """``Environment=<key>=…`` from a unit file, or None."""
     if not unit_path.exists():
         return None
     try:
         text = unit_path.read_text(encoding="utf-8")
     except OSError:
         return None
+    prefix = f"{key}="
     for line in text.splitlines():
         body = line.strip()
         if body.startswith("Environment="):
             body = body[len("Environment=") :].strip().strip('"')
-            if body.startswith("HERMES_HOME="):
+            if body.startswith(prefix):
                 return body.split("=", 1)[1].strip().strip('"') or None
     return None
 
 
 def _sync_hermes_home_from_systemd_unit(system: bool) -> None:
-    """Adopt a system-scope unit's ``HERMES_HOME``: under ``sudo`` it is stripped and HOME=/root, so
-    get_hermes_home() would pick the wrong profile for runtime-status/PID reads."""
+    """Adopt a system-scope unit's ``HERMES_HOME``/``HOME``: under ``sudo`` both are stripped and
+    HOME=/root, so get_hermes_home() would pick the wrong profile for runtime-status/PID reads."""
     if not system:
         return
+    # Resolve the unit ONCE, before adopting anything: the values adopted below change the service name
+    # _profile_suffix() derives (with HOME=/root the platform default is /root/.hermes, so the unit's own
+    # home hashes to hermes-gateway-3b9712e6), and a second lookup would miss the file read here.
+    unit_path = get_systemd_unit_path(system=system)
     # On-disk unit first; ``systemctl show`` for units that only exist in the manager.
-    unit_home = (_hermes_home_from_systemd_unit_file(system=True) or "").strip()
+    unit_home = (_unit_env_from_file(unit_path, "HERMES_HOME") or "").strip()
     if not unit_home:
         env_line = _systemctl_show(("Environment",), system=True).get("Environment", "")
         unit_home = _parse_kv_pairs(env_line.split()).get("HERMES_HOME", "").strip()
     if unit_home and os.environ.get("HERMES_HOME", "").strip() != unit_home:
         os.environ["HERMES_HOME"] = unit_home
+
+    # HOME as well, or the hashed name above sticks: the restart wait then polls a unit that does not
+    # exist and reports a false "did not become active" while the real one is up.
+    unit_home_dir = (_unit_env_from_file(unit_path, "HOME") or "").strip()
+    if unit_home_dir and os.environ.get("HOME", "").strip() != unit_home_dir:
+        os.environ["HOME"] = unit_home_dir
 
 
 def _read_systemd_unit_properties(
@@ -2631,7 +2646,10 @@ def _build_wsl_interop_paths(path_entries: list[str]) -> list[str]:
     candidates = [entry for entry in os.environ.get("PATH", "").split(os.pathsep) if entry.startswith("/mnt/")]
     for executable in ("powershell.exe", "cmd.exe", "explorer.exe", "wsl.exe"):
         resolved = shutil.which(executable)
-        if resolved:
+        # Only when the file really is *executable*: a foreign or stubbed PATH entry resolves other
+        # binaries, and baking its dir into a unit that outlives the invoking shell is exactly the
+        # caller-dependent PATH this function exists to avoid.
+        if resolved and Path(resolved).name.lower() == executable:
             candidates.append(str(Path(resolved).parent))
     candidates += [
         entry
@@ -2892,6 +2910,18 @@ def _normalize_launchd_plist_for_comparison(text: str) -> str:
     )
 
 
+def _normalize_path_payload(text: str) -> str:
+    """Blank the generated systemd ``Environment="PATH=…"`` payload before comparison.
+
+    PATH is captured from the invoking shell and varies across shells (WSL interop appends every
+    Windows path), so comparing it flags a correct unit as outdated on every single status/restart,
+    and each refresh rewrites the unit with the current shell's PATH. Mirrors the launchd
+    comparison's ``__HERMES_PATH__`` normalization.
+    """
+    import re
+    return re.sub(r'(Environment="PATH=)([^"]*)(")', r"\1__HERMES_PATH__\3", text)
+
+
 def systemd_unit_is_current(system: bool = False) -> bool:
     # HERMES_HOME sync chokepoint for every compare/regenerate path: under `sudo … --system` it is often
     # stripped to /root/.hermes, so refresh would rewrite a correct unit and status warn forever.
@@ -2906,7 +2936,7 @@ def systemd_unit_is_current(system: bool = False) -> bool:
     expected_user = _read_systemd_user_from_unit(unit_path) if system else None
     expected = generate_systemd_unit(system=system, run_as_user=expected_user)
     # Ignore directives older systemd drops (RestartMaxDelaySec, RestartSteps) to avoid a perpetual "outdated" flag.
-    norm = lambda text: _normalize_service_definition(_strip_optional_systemd_directives(text))  # noqa: E731
+    norm = lambda text: _normalize_path_payload(_normalize_service_definition(_strip_optional_systemd_directives(text)))  # noqa: E731
     return norm(installed) == norm(expected)
 
 

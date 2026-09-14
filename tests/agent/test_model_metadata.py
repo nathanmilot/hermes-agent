@@ -356,6 +356,7 @@ class TestDefaultContextLengths:
         expected_keys = {
             "deepseek-v4-pro": 1_000_000,
             "deepseek-v4-flash": 1_000_000,
+            "deepseek-flash": 1_000_000,
             "deepseek-chat": 1_000_000,
             "deepseek-reasoner": 1_000_000,
         }
@@ -375,6 +376,9 @@ class TestDefaultContextLengths:
             cases = [
                 ("deepseek-v4-pro", 1_000_000),
                 ("deepseek-v4-flash", 1_000_000),
+                # OpenCode Go/Zen short id must not fall back to the 128K
+                # bare ``deepseek`` substring when metadata probing is off.
+                ("deepseek-flash", 1_000_000),
                 ("deepseek/deepseek-v4-pro", 1_000_000),
                 ("deepseek/deepseek-v4-flash", 1_000_000),
                 ("deepseek-chat", 1_000_000),

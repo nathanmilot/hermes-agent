@@ -304,6 +304,9 @@ _OFFICIAL_DOCS_PRICING[("opencode-go", "deepseek-v4-flash")] = PricingEntry(
     source_url="https://opencode.ai/pricing",
     pricing_version="opencode-pricing-2026-07",
 )
+# The Go platform serves the V4.1 generation under the short ``deepseek-flash``
+# id at the same bundled rates as the V4 id.
+_OFFICIAL_DOCS_PRICING[("opencode-go", "deepseek-flash")] = _OFFICIAL_DOCS_PRICING[("opencode-go", "deepseek-v4-flash")]
 
 
 def _to_decimal(value: Any) -> Optional[Decimal]:

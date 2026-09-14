@@ -1521,6 +1521,38 @@ class TestSystemUnitRefreshSyncsHermesHome:
             )
 
 
+    def test_sync_adopts_unit_home_for_service_name_derivation(self, tmp_path, monkeypatch):
+        """Under sudo, HOME=/root makes the platform-native default home /root/.hermes, so
+        _profile_suffix() hashes the unit's own home into a service name that does not exist
+        (hermes-gateway-3b9712e6). The restart wait then polls that phantom unit and reports a false
+        "did not become active" while the real unit is up.
+        """
+        unit_path = tmp_path / "hermes-gateway.service"
+        unit_path.write_text(
+            'Environment="HERMES_HOME=/home/alice/.hermes"\nEnvironment="HOME=/home/alice"\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(gateway_cli, "get_systemd_unit_path", lambda system=False: unit_path)
+        monkeypatch.setenv("HERMES_HOME", "/root/.hermes")
+        monkeypatch.setenv("HOME", "/root")
+
+        gateway_cli._sync_hermes_home_from_systemd_unit(system=True)
+
+        assert os.environ["HERMES_HOME"] == "/home/alice/.hermes"
+        assert os.environ["HOME"] == "/home/alice"
+
+    def test_sync_leaves_home_alone_for_unit_without_home(self, tmp_path, monkeypatch):
+        unit_path = tmp_path / "hermes-gateway.service"
+        unit_path.write_text('Environment="HERMES_HOME=/home/alice/.hermes"\n', encoding="utf-8")
+        monkeypatch.setattr(gateway_cli, "get_systemd_unit_path", lambda system=False: unit_path)
+        monkeypatch.setenv("HERMES_HOME", "/root/.hermes")
+        monkeypatch.setenv("HOME", "/root")
+
+        gateway_cli._sync_hermes_home_from_systemd_unit(system=True)
+
+        assert os.environ["HOME"] == "/root"
+
+
 class TestHermesHomeForTargetUser:
     """Unit tests for _hermes_home_for_target_user()."""
 

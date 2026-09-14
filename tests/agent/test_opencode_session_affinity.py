@@ -62,6 +62,26 @@ def test_auxiliary_calls_share_the_main_turn_session_key():
         aux._RUNTIME_MAIN_CONTEXT.reset(token)
 
 
+def test_iteration_summary_call_carries_the_session_header():
+    """The chat/anthropic summary builders hand-build kwargs; the header must still ride along."""
+    from agent import chat_completion_helpers as cch
+
+    agent = _agent("opencode-go", "glm-5", "https://opencode.ai/zen/go/v1")
+    seen = {}
+
+    def _callback(request):
+        seen.update(request)
+        return None
+
+    cch._managed_summary_call(agent, "req-1", {"model": "glm-5", "messages": _MSGS}, _callback, retry_count=0)
+    assert seen["extra_headers"]["x-opencode-session"] == "sess-affinity-1"
+
+    other = _agent("openrouter", "anthropic/claude-sonnet-4.6", "https://openrouter.ai/api/v1")
+    seen.clear()
+    cch._managed_summary_call(other, "req-2", {"model": "x", "messages": _MSGS}, _callback, retry_count=0)
+    assert "extra_headers" not in seen
+
+
 def test_out_of_turn_calls_never_drop_the_header(monkeypatch):
     """The /goal judge runs after the turn facade reset the contextvars; Console Go 400s on a
     missing header, so an unresolvable scope falls back instead of dropping it."""
